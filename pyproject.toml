@@ -1,0 +1,30 @@
+[project]
+name = "capa-8d-expert"
+version = "0.1.0"
+description = "CAPA/8D Expert Knowledge Worker RAG App"
+requires-python = ">=3.11"
+
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "chromadb>=0.5.0",
+    "python-dotenv>=1.0.0",
+    "tenacity>=8.2.0",
+    "tqdm>=4.66.0",
+    "gradio>=5.0.0",
+    "pydantic>=2.0.0",
+    # BGE reranker — install separately if you want local reranking:
+    # uv add torch transformers
+    # (~2GB download for torch, ~570MB for the model on first run)
+    "torch>=2.11.0",
+    "transformers>=5.3.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[tool.uv.sources]
+# torch from PyPI (CPU-only build is lighter — swap for cu121 if you have a GPU)
