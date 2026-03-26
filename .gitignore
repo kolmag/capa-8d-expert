@@ -25,6 +25,7 @@ evaluation/tests_v2.jsonl
 
 # Knowledge base documents — provide your own
 knowledge-base/markdown/*.md
+!knowledge-base/markdown/README.md
 knowledge-base/raw_docs/
  
 # macOS
