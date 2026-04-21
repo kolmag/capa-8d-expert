@@ -9,13 +9,12 @@ wheels/
 # Environment
 .env
 .venv/
-__pycache__/
 *.pyc
 *.pyo
- 
+
 # Vector store — regenerate with: uv run scripts/ingest.py --reset
 chroma_db/
- 
+
 # Eval results — generated output
 evaluation/results/
 
@@ -27,21 +26,33 @@ evaluation/tests_v2.jsonl
 knowledge-base/markdown/*.md
 !knowledge-base/markdown/README.md
 knowledge-base/raw_docs/
- 
+
 # macOS
 .DS_Store
- 
+
 # IDE
 .vscode/
 .idea/
 *.egg-info/
- 
+
 # Cursor
 .cursor/
 .cursorignore
 .cursorindexingignore
- 
+
 # uv
 .uv/
-uv.lock
 .python-version
+
+# Langfuse local config
+.langfuse/
+
+# t-SNE diagnostic outputs — generated, not source
+tsne_*.html
+tsne_*.png
+
+# Workbench app — published separately at kolmag/8d-expert-workbench
+workbench_app.py
+
+# Other
+gemini.md

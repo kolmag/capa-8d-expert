@@ -51,6 +51,7 @@ CHUNK_OVERLAP      = 200    # tokens
 
 # LLM for semantic enrichment
 ENRICHMENT_MODEL   = "claude-haiku-4-5"   # fast + cheap + excellent JSON
+ENRICHMENT_TEMP    = 0                    # deterministic — same text always produces same headline
 
 # Embedding model
 EMBEDDING_MODEL    = "text-embedding-3-small"
@@ -243,6 +244,7 @@ def enrich_chunk(chunk: RawChunk, client: Anthropic) -> EnrichedChunk:
     response = client.messages.create(
         model=ENRICHMENT_MODEL,
         max_tokens=300,
+        temperature=ENRICHMENT_TEMP,
         system=ENRICHMENT_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
     )
