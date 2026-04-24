@@ -97,36 +97,35 @@ Evaluated against **197 test questions** across 3 independent sources:
 
 The eval framework calculates MRR only for questions with `expected_sources` defined. Of 197 questions, 48 structured questions (t001–t048) have expected sources — the remaining 149 blind questions (t051–t197) have `expected_sources=[]` and always score MRR=0 by design. The headline MRR figure (0.198–0.203) is therefore not a retrieval quality metric — it is a structural artefact of the eval design. The meaningful retrieval metric is MRR on structured questions only (~0.80–0.92 depending on run). Judge scores (correctness, completeness, groundedness) are valid across all 197 questions.
 
-### Full 197-question eval — two runs compared
+### Full 197-question eval — three runs compared
 
-| Metric | Pre-iteration baseline | Post-iteration (FINDING anchors + temp=0) | Delta |
-|---|---|---|---|
-| Judge — Overall | **6.926** | **6.774** | -0.152 |
-| Judge — Correctness | 7.412 | 7.246 | -0.166 |
-| Judge — Completeness | 6.268 | 6.149 | -0.119 |
-| Judge — Groundedness | 7.098 | 6.928 | -0.170 |
-| Source coverage rate | 99.0% | 96.9% | -2.1% |
-| Mean top chunk score | 4.049 | 4.048 | ~0 |
-| Checker score | 0.665 | 0.651 | -0.014 |
-| Checker fired rate | 87.6% | 85.1% | -2.5% |
+| Metric | Baseline (Apr 20) | FINDING anchors (Apr 21) | Guardrails + Markdown (Apr 24) | vs Baseline |
+|---|---|---|---|---|
+| Judge — Overall | 6.926 | 6.774 | **7.094** | **+0.168** |
+| Judge — Correctness | 7.412 | 7.246 | **7.426** | +0.014 |
+| Judge — Completeness | 6.268 | 6.149 | **6.369** | +0.101 |
+| Judge — Groundedness | 7.098 | 6.928 | **7.487** | **+0.389** |
+| Mean top chunk score | 4.049 | 4.048 | **5.120** | **+1.071** |
+| Source coverage rate | 99.0% | 96.9% | 95.9% | -3.1% |
+| Checker score | 0.665 | 0.651 | 0.636 | -0.029 |
 
-### By category — pre vs post iteration
+### By category — baseline vs current best
 
-| Category | Pre overall | Post overall | Delta | Pre MRR | Post MRR |
-|---|---|---|---|---|---|
-| example | 4.670 | **6.330** | **+1.660** ✅ | 0.383 | **0.875** ✅ |
-| 8D_methodology | 6.670 | **6.860** | **+0.190** ✅ | 0.161 | 0.170 |
-| mixed | 6.360 | **6.560** | **+0.200** ✅ | 0.000 | 0.000 |
-| compliance | 6.710 | 6.730 | +0.020 → | 0.235 | 0.235 |
-| edge_case | 7.110 | 7.030 | -0.080 → | 0.000 | 0.000 |
-| containment | 7.620 | 7.350 | -0.270 | 0.136 | 0.136 |
-| RCA | 7.620 | 7.370 | -0.250 | 0.228 | 0.225 |
-| VoE | 6.970 | 6.610 | -0.360 | 0.262 | 0.205 |
-| CAPA_procedure | 6.050 | 5.650 | -0.400 | 0.116 | 0.117 |
-| enriched_content | 8.220 | 7.890 | -0.330 | 1.000 | 1.000 |
-| FMEA | 6.840 | 6.180 | -0.660 | 0.373 | 0.373 |
+| Category | Baseline | Apr 21 | Apr 24 | vs Baseline |
+|---|---|---|---|---|
+| enriched_content | 8.220 | 7.890 | **8.670** | **+0.450** ✅ |
+| example | 4.670 | 6.330 | **6.420** | **+1.750** ✅ |
+| FMEA | 6.840 | 6.180 | **7.350** | **+0.510** ✅ |
+| RCA | 7.620 | 7.370 | **7.980** | **+0.360** ✅ |
+| mixed | 6.360 | 6.560 | **6.920** | **+0.560** ✅ |
+| compliance | 6.710 | 6.730 | **7.040** | **+0.330** ✅ |
+| 8D_methodology | 6.670 | 6.860 | **6.880** | +0.210 ✅ |
+| CAPA_procedure | 6.050 | 5.650 | 6.240 | +0.190 → |
+| VoE | 6.970 | 6.610 | 6.700 | -0.270 ❌ |
+| containment | 7.620 | 7.350 | 7.260 | -0.360 ❌ |
+| edge_case | 7.110 | 7.030 | 6.580 | -0.530 ❌ |
 
-**Interpretation:** The FINDING anchors + temperature=0 fix achieved its primary objective — `example` category improved +1.66 with MRR jumping from 0.383 → 0.875. The overall regression (-0.15) is explained by generation quality changes across several categories after the `--reset` re-ingest, not retrieval degradation (MRR is unchanged for all regressing categories). The `--reset` generated new Haiku headlines at `temperature=0` for all documents — valid but slightly different from the previous run's headlines, producing marginally worse answer quality for FMEA, VoE, and CAPA_procedure categories. The pre-iteration baseline (6.926) remains the best overall score. Next iteration priority: GPT-4o-mini guardrails to reduce generic filler that triggers the groundedness checker, and markdown-aware chunking to fix sequential content splitting (t019 completeness).
+**Interpretation:** Apr 24 run is the new best overall (7.094 vs baseline 6.926). Groundedness +0.389 confirms the ANSWER_SYSTEM guardrails are reducing GPT-4o-mini padding. top_chunk_score +1.071 confirms markdown-aware chunking produces better BGE-scored chunks. Seven categories improved vs baseline; three regressed (`VoE`, `containment`, `edge_case`) — these are the targets for the next iteration. Pending fix: `CHUNK_SIZE` reduction from 500 → 400 tokens to address BGE 512-token truncation risk (BGE tokenizer ~1.15× GPT token count).
 
 ### Example category iteration (4 questions, tracked separately)
 
@@ -137,7 +136,8 @@ The eval framework calculates MRR only for questions with `expected_sources` def
 | + category map change | 5.50 | 0.542 | 5.56 | 7.0 | 4.0 | 8.0 | 3.0 | --reset broke embeddings |
 | + FACTUAL RECALL RULE | 4.83 | 0.473 | 5.56 | 5.7 | 4.3 | 7.3 | 2.0 | Answer prompt change backfired |
 | Partial revert | 5.33 | 0.442 | 5.56 | 4.3 | 6.0 | 7.0 | 4.0 | FACTUAL RECALL still active |
-| + FINDING anchors + temp=0 | **6.58** | **0.875** | **7.96** | 7.3 | 3.3 | 8.7 | 7.0 | Stable deterministic baseline |
+| + FINDING anchors + temp=0 | 6.58 | 0.875 | 7.96 | 7.3 | 3.3 | 8.7 | 7.0 | Stable deterministic baseline |
+| + Guardrails + Markdown | **7.42** | **1.000** | **7.28** | 6.3 | 5.3 | 8.0 | **10.0** | New best — MRR perfect |
 
 ---
 
@@ -191,15 +191,45 @@ This section documents the iteration cycle on the `example` category — from a 
 
 | Category | Spread (before) | Spread (after) | example centroid distance (after) |
 |---|---|---|---|
-| example | scattered, no cluster | 4.56 | — |
-| general | everywhere | 7.00 | **16.00** |
-| tool | moderate | 7.48 | 24.20 |
-| procedure | scattered | 6.24 | 17.28 |
-| compliance | moderate | 3.18 | 7.79 ⚠️ |
-| reference | isolated | 3.27 | 11.08 |
-| methodology | moderate | 6.12 | 13.84 |
+| example | scattered, no cluster | 4.98 | — |
+| general | everywhere | 6.04 | **21.25** |
+| tool | moderate | 6.80 | 19.92 |
+| procedure | scattered | 8.64 | 17.85 |
+| compliance | moderate | 3.37 | 18.57 |
+| reference | isolated | 4.21 | 11.84 |
+| methodology | moderate | 7.68 | 13.47 |
 
-`compliance` at distance 7.79 from `example` is a latent risk — IATF 16949 D7/PFMEA content shares vocabulary with the automotive example D7 section.
+`general` chunks within distance 5 of `example`: **0/28 (0%)** — down from 17% in the previous run. FINDING anchors + CHUNK_SIZE=400 eliminated cross-category contamination entirely.
+
+---
+
+### Cosine Similarity (Sc) analysis
+
+Run with `sc_viz.py` (see Diagnostics section). Two outputs: intra-category violin plot and cross-category heatmap.
+
+**Intra-category Sc — how coherent each category is internally:**
+
+| Category | N chunks | Mean Sc | Interpretation |
+|---|---|---|---|
+| compliance | 20 | **0.680** | Tightest — ISO/IATF docs share dense vocabulary |
+| methodology | 15 | 0.661 | Good — 8D disciplines share framework vocabulary |
+| example | 29 | 0.657 | Good — automotive + semiconductor share CAPA vocabulary |
+| reference | 27 | 0.624 | Moderate — FMEA and control plan related but distinct |
+| tool | 55 | 0.621 | Moderate — RCA tools share methods |
+| general | 28 | 0.610 | Lower — practitioner scenarios cover broad topics |
+| procedure | 34 | **0.588** | Most scattered — containment, CAPA SOP, VoE are procedurally distinct |
+
+**Cross-category competition risks (from heatmap):**
+
+| Category A | Category B | Mean Sc | Risk |
+|---|---|---|---|
+| compliance | compliance (intra) | 0.680 | Healthy diagonal |
+| compliance | example | **0.656** | ⚠️ Highest risk — IATF D7/PFMEA content overlaps automotive example D7 |
+| methodology | methodology (intra) | 0.661 | Healthy diagonal |
+| general | procedure | 0.610 | Moderate — practitioner scenarios overlap procedural guidance |
+| example | general | **0.502** | ✅ Low — FINDING anchors successfully separated these categories |
+
+The `compliance ↔ example` risk (0.656) is the highest competition risk in the current KB. IATF 16949 requirements for D7 FMEA updates share vocabulary with the automotive worked example's D7 section. Not yet causing eval failures but monitored. The `example ↔ general` Sc of 0.502 confirms the FINDING anchor fix worked at the embedding level — the two categories that caused retrieval failures are now the least similar pair in the KB.
 
 ---
 
@@ -230,26 +260,25 @@ This section documents the iteration cycle on the `example` category — from a 
 After any KB change:
 1. `uv run scripts/ingest.py --reset` (only if structural changes — otherwise upsert)
 2. `uv run scripts/diagnostics/tsne_viz.py` — check for category bleeding before running eval
-3. `uv run evaluation/eval.py --category [affected_category]` — fast category check
-4. Only if category eval is clean: `uv run evaluation/eval.py` — full 197-question eval
+3. `uv run scripts/diagnostics/sc_viz.py` — check intra-category coherence and cross-category competition risks
+4. `uv run evaluation/eval.py --category [affected_category]` — fast category check
+5. Only if category eval is clean: `uv run evaluation/eval.py` — full 197-question eval
 
 ---
 
 ### Known limitations
 
 **t019 (5 Whys walk-through) — generation quality**
-MRR=1.0 and top_chunk_score=9.71 (perfect retrieval) but judge overall=3.3/10. The LLM retrieves the complete 5 Whys chain but summarises the root cause rather than reproducing the chain step by step. Planned fix: a worked example in the answer generation prompt demonstrating how to reproduce a numbered chain when the context contains one.
+MRR=1.0 and top_chunk_score=9.71 (perfect retrieval) but judge overall=5.3/10 (improved from 3.3 with markdown chunking). The LLM now retrieves the complete 5 Whys chain and produces more of it, but completeness remains below target. Checker score 0.28 indicates the checker is still stripping content. Next fix: further tighten the sequential process instruction in ANSWER_SYSTEM.
 
-**`general` category structural overlap**
-t-SNE analysis of the final embedding space (parsed from HTML, 170 vectors × 1536 dims) confirms the macro-level separation is healthy: `example` centroid at (7.98, -11.84) is distance 16.00 from `general` centroid at (-3.92, -1.14). However, 4 specific `general` chunks (17% of the category) remain within distance 5 of example chunks:
+**`edge_case`, `containment` — below baseline**
+After all iterations: edge_case 6.75 (baseline 7.11, -0.36), containment 7.09 (baseline 7.62, -0.53). VoE recovered to 7.32 (+0.35 vs baseline) after CHUNK_SIZE=400 fix. Root cause for remaining gaps: blind questions use conversational/scenario phrasing ("supplier ghosted us", "issue disappears before verification") that doesn't map to formal SOP vocabulary. BGE top_chunk_scores for these categories average 3.3–3.8 vs 7–9 for well-performing categories. Fix: synthetic query enrichment — add practitioner question phrasings to embed_text during ingest so BGE can bridge the vocabulary gap.
 
-- A SCAR/supplier detection failure chunk from `8d_practitioner_scenarios.md` at (-1.59, -11.63) — sitting inside the semiconductor example cluster
-- Two `capa_edge_cases.md` chunks about ICA failure and detection gaps at (-4.28, -6.30) and (-4.49, -6.75) — near the automotive example's Is/Is Not table chunk at (-2.32, -9.88), which has no FINDING anchor because it is in the document body rather than the QR section
-- One `8d_practitioner_scenarios.md` supplier escalation chunk near the same area
+**compliance ↔ example retrieval competition risk**
+Sc analysis shows mean cosine similarity of 0.656 between compliance and example chunks — highest cross-category competition risk in the KB. IATF 16949 D7/PFMEA requirement content overlaps vocabulary with the automotive example's D7 section. Not yet causing eval failures but flagged for monitoring. Mitigation: FINDING anchors in example documents provide case-specific vocabulary that should outscore compliance chunks for example-specific queries.
 
-Additional risk: `compliance` centroid distance to `example` is only 7.79 — the IATF 16949 D7/PFMEA compliance content uses nearly identical vocabulary to the automotive example D7 section. Not yet causing eval failures but a known latent risk.
-
-Long-term fix: split `capa_edge_cases.md` and `8d_practitioner_scenarios.md` into smaller topically focused files (one semantic purpose per document, 300–500 words each), and add FINDING anchors to document body chunks that are retrieval-critical, not just QR section chunks. Deferred to next iteration.
+**`general` category structural overlap — resolved**
+Previous runs showed 17% of general chunks within distance 5 of example chunks. After FINDING anchors + CHUNK_SIZE=400: 0% overlap confirmed by both t-SNE (0 stragglers) and Sc heatmap (example ↔ general mean Sc = 0.502, lowest cross-category pair).
 
 ---
 
@@ -320,6 +349,18 @@ uv run scripts/diagnostics/tsne_viz.py \
     --db_path ./chroma_db \
     --collection capa_8d_expert \
     --dims 2
+
+# Cosine similarity analysis — intra-category coherence + cross-category competition
+uv run scripts/diagnostics/sc_viz.py \
+    --db_path ./chroma_db \
+    --collection capa_8d_expert
+
+# Sc with per-query analysis (embeds 20 sample questions, shows retrieval competition)
+uv run scripts/diagnostics/sc_viz.py \
+    --db_path ./chroma_db \
+    --collection capa_8d_expert \
+    --queries evaluation/tests_v3.jsonl \
+    --n_queries 20
 ```
 
 ---

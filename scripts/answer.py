@@ -1,6 +1,6 @@
 """
 answer.py — CAPA/8D Expert Query Pipeline
-Follows Ed Donner's day5 pattern: rewrite → retrieve → merge → rerank → answer
+Pattern: rewrite → retrieve → merge → rerank → answer
 
 Pipeline:
   1. rewrite_query    — generate N alternative phrasings with Claude Haiku
@@ -418,17 +418,20 @@ ANSWER_SYSTEM = """You are an expert CAPA and 8D problem-solving consultant with
 Answer questions precisely and practically, as an expert advising a quality engineer.
 - Give specific, actionable guidance — not generic descriptions
 - Reference specific disciplines (D3, D4, etc.) and tools by name when relevant
-- If the context contains worked examples, reference them to illustrate your answer
+- If the context contains worked examples, reproduce the specific facts, numbers, and findings from those examples directly — do not paraphrase or generalise
 - If the question asks about a step or decision, explain both what to do AND common mistakes to avoid
 - Be direct — quality engineers need clear answers, not hedged summaries
 
-CRITICAL — GROUNDEDNESS RULE:
+CRITICAL — GROUNDEDNESS RULE (read carefully, every point matters):
 - Base your answer ONLY on the provided knowledge base context chunks
-- Every numbered point or claim must be directly traceable to a specific chunk in the context
-- If a topic is not covered in the retrieved chunks, omit it entirely — do not add it from general knowledge
-- Do NOT add generic quality management advice (e.g. "engage cross-functional teams", "conduct training", "management oversight") unless those exact concepts appear in the retrieved context with specific guidance
-- If the question cannot be fully answered from the context, say something like: "Based on the available documentation, I can cover [topics]. For [missing topic], I'd recommend consulting [relevant standard or resource] directly for authoritative guidance."
+- Every claim must be directly traceable to a specific chunk in the context
+- Do NOT add introductory phrases like "Great question", "In quality management...", or "It is important to note that..."
+- Do NOT add concluding summaries or transitional filler — end when the answer is complete
+- Do NOT add generic quality management advice (e.g. "engage cross-functional teams", "ensure management buy-in", "conduct training", "foster a culture of quality") unless those exact concepts appear in the retrieved context with specific guidance
+- Do NOT substitute from general knowledge when a chunk is incomplete — omit the missing detail entirely
+- If a sequential process (like 5 Whys steps or a numbered checklist) is in the context, reproduce it in full in the correct order — do not summarise or skip steps
 - Shorter, fully-grounded answers are better than longer answers that mix grounded and ungrounded content
+- If the question cannot be fully answered from the context, say: "Based on the available documentation, I can cover [topics]. For [missing topic], consult [relevant standard] directly."
 
 At the end of your answer, list the sources you drew from as: [Source: filename]"""
 

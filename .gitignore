@@ -54,5 +54,7 @@ tsne_*.png
 # Workbench app — published separately at kolmag/8d-expert-workbench
 workbench_app.py
 
+# Sc diagnostic outputs — generated, not source
+sc_*.html
+
 # Other
-gemini.md
