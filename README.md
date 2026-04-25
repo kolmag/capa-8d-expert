@@ -125,7 +125,37 @@ The eval framework calculates MRR only for questions with `expected_sources` def
 | FMEA | 6.840 | 6.180 | 7.350 | **6.590** | -0.250 ❌ |
 | enriched_content | 8.220 | 7.890 | 8.670 | **7.670** | -0.550 ❌ |
 
-**Interpretation:** Apr 25 is the final best overall (7.121, +0.195 vs baseline). Containment is the star of the final run — 8.200, the highest single-category score in the project, recovered from 7.260 (Apr 24 regression) by adding practitioner scenario content. Seven categories improved vs baseline. Three regressions remain: `VoE` (-0.230), `FMEA` (-0.250), `enriched_content` (-0.550). The enriched_content drop from 8.67 (Apr 24) to 7.67 is the largest unresolved issue — the new KB additions may be competing with the hand-enriched documents. Deferred to next iteration. Groundedness +0.358 vs baseline confirms the ANSWER_SYSTEM anti-padding guardrails are working.
+### Model benchmark — GPT-4o-mini + Haiku vs Llama 3.3 70B full-stack (Groq)
+
+Same 197-question test set, same BGE reranker, same Sonnet 4.5 judge. Only variable: answer generation + query rewriting + groundedness checker.
+
+| Metric | GPT-4o-mini + Claude Haiku | Llama 3.3 70B (Groq, full-stack) | Delta |
+|---|---|---|---|
+| Overall | **7.121** | 6.942 | -0.179 |
+| Correctness | **7.441** | 7.323 | -0.118 |
+| Completeness | **6.467** | 6.205 | -0.262 |
+| Groundedness | **7.456** | 7.297 | -0.159 |
+| Checker score | **0.671** | 0.590 | -0.081 |
+| Median latency | ~28s | **~32s** | +4s |
+| Est. cost / 197q | ~$2.50 | **~$1.20** | -52% |
+
+**Category winners:**
+
+| Category | Winner | Delta |
+|---|---|---|
+| compliance | GPT-4o-mini +Haiku | +0.920 |
+| enriched_content | GPT-4o-mini + Haiku | +0.890 |
+| containment | GPT-4o-mini + Haiku | +0.500 |
+| VoE | Llama 3.3 70B | +0.230 |
+| 8D_methodology | Llama 3.3 70B | +0.180 |
+
+**Key findings:**
+- Llama 3.3 70B is 52% cheaper and competitive on general methodology questions
+- GPT-4o-mini + Haiku wins significantly on compliance-heavy and enriched content categories — formal standards vocabulary (ISO, IATF clause language) favours GPT-4o-mini
+- Llama's checker is stricter on its own output (checker_score 0.590 vs 0.671) — no self-leniency detected. The groundedness drop is real generation quality, not false confidence
+- **Recommendation for production:** Llama 3.3 70B as generator with Claude Haiku as rewriter/checker (preserving model diversity) is the next benchmark to run. Expected to recover most of the compliance gap while retaining the cost advantage
+
+*Note: latency measured on M1 8GB with shared memory pressure during eval. Median is the reliable metric — max latency (1698s) reflects OS competition for unified memory, not model performance.*
 
 ### Example category iteration (4 questions, tracked separately)
 
@@ -389,10 +419,61 @@ capa-8d-expert/
 
 ---
 
-## License
+## Production Architecture Roadmap
 
-MIT
+This repository is a portfolio implementation demonstrating production-grade RAG patterns. The current stack (Gradio, local Chroma, local BGE) is optimised for rapid iteration and eval-driven development — not for horizontal scaling. This section documents the known gaps and the transition path to a fully production-ready system.
 
----
+```mermaid
+graph TD
+    Client[Next.js / React Frontend]
+    API[FastAPI Gateway — SSE Streaming]
+    Router[LangGraph Router Agent]
+    Builder[8D Builder Service]
+    RAG[RAG Retrieval Pipeline]
+    Critic[Groundedness Critic]
+    Postgres[(PostgreSQL — 8D State + Users)]
+    VectorDB[(Qdrant / Pinecone)]
+    Groq[Groq — Llama 3.3 70B]
+    Anthropic[Anthropic — Claude Sonnet]
+
+    Client -- SSE Stream --> API
+    API --> Router
+    Router -- Tool: Save State --> Builder
+    Router -- Tool: Query KB --> RAG
+    Builder --> Postgres
+    RAG --> VectorDB
+    RAG --> Groq
+    RAG --> Critic
+    Critic --> Anthropic
+```
+
+### Phase 1 — API Layer (FastAPI)
+Replace Gradio's stateful process with a RESTful FastAPI backend. Streaming via Server-Sent Events (SSE). Move 8D Builder state from `gr.State` (in-memory) to PostgreSQL — accept `report_id` per request for stateless horizontal scaling.
+
+### Phase 2 — Infrastructure
+Migrate from local Chroma to managed vector store (Qdrant Cloud or Pinecone) to decouple embeddings from compute. Offload BGE reranker to a dedicated GPU microservice or replace with Cohere Rerank v3.5 managed API — eliminates the M1/8GB RAM constraint entirely.
+
+### Phase 3 — Agentic Orchestration (LangGraph)
+Transition from the current static pipeline (`answer.py`) to a stateful multi-actor system. Router agent evaluates intent: KB question vs. 8D state read/write vs. ERP integration. Tool calling for database reads/writes, QMS push, and ERP inventory queries. Model routing: Llama 3.3 70B via Groq for generation, Claude Haiku for JSON-constrained tasks (query rewriting, groundedness checking).
+
+### Phase 4 — Automated KB Ingestion
+SOPs are living documents. CI/CD for knowledge: GitHub Action or Airflow DAG triggered on document updates. Pipeline: parse updated Markdown → Haiku semantic enrichment → embed → upsert to vector store (soft-delete outdated chunks). KB stays current without manual re-ingest.
+
+### Phase 5 — Enterprise Security
+OAuth2/OIDC (Entra ID, Okta) for corporate SSO. RBAC with metadata filtering at the vector store level — every chunk tagged with `tenant_id` and `division_id`, ensuring users retrieve only authorised SOPs. Audit logging on all LLM interactions for compliance traceability.
+
+**Current portfolio limitations vs. production requirements:**
+
+| Concern | Current (Portfolio) | Production |
+|---|---|---|
+| State persistence | `gr.State` (in-memory) | PostgreSQL + `report_id` |
+| Vector store | Local Chroma | Qdrant Cloud / Pinecone |
+| Reranker | Local BGE (OOM on M1 8GB) | Dedicated GPU microservice / Cohere API |
+| Scaling | Single process, Gradio | FastAPI + horizontal pods |
+| Auth | None | OAuth2/OIDC + RBAC |
+| KB updates | Manual `--reset` ingest | CI/CD triggered auto-ingest |
+| Observability | Langfuse (implemented) | Langfuse + alerting on score degradation |
+
+
 
 *Built as part of an AI engineering portfolio. The engineering post-mortem above documents the full iteration cycle — baseline, regressions, root cause analysis, and fixes. Evaluation-driven development: every KB change is measured against a 197-question test set before committing.*

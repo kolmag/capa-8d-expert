@@ -60,4 +60,3 @@ workbench_app.py
 # Sc diagnostic outputs — generated, not source
 sc_*.html
 
-# Other

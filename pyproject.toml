@@ -21,6 +21,7 @@ dependencies = [
     "scikit-learn>=1.8.0",
     "plotly>=6.6.0",
     "langfuse>=4.3.1",
+    "groq>=1.2.0",
 ]
 
 [dependency-groups]

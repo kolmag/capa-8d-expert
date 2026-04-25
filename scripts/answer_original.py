@@ -40,6 +40,7 @@ except ImportError:
 import chromadb
 from anthropic import Anthropic
 from openai import OpenAI
+from groq import Groq
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 # ── Config ─────────────────────────────────────────────────────────────────────
@@ -47,9 +48,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 CHROMA_DIR      = Path("chroma_db")
 COLLECTION_NAME = "capa_8d_expert"
 
-REWRITE_MODEL   = "claude-haiku-4-5"    # fast query rewriting
-ANSWER_MODEL    = "gpt-4o-mini"         # answer generation
-LLM_RERANK_MODEL = "claude-haiku-4-5"  # fallback LLM reranker
+REWRITE_MODEL    = "llama-3.3-70b-versatile"  # Groq — replaces Claude Haiku
+ANSWER_MODEL     = "llama-3.3-70b-versatile"  # Groq — replaces GPT-4o-mini
+LLM_RERANK_MODEL = "llama-3.3-70b-versatile"  # Groq — fallback reranker
+# NOTE: text-embedding-3-small (OpenAI) and BGE reranker unchanged
+# NOTE: eval judge remains claude-sonnet-4-5 for score comparability
 
 BGE_MODEL_NAME  = "BAAI/bge-reranker-v2-m3"  # HuggingFace cross-encoder
 
@@ -212,18 +215,21 @@ Score this chunk's relevance to the question. Return JSON only."""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
-def _llm_score_chunk(question: str, chunk: RetrievedChunk, client: Anthropic) -> float:
-    response = client.messages.create(
+def _llm_score_chunk(question: str, chunk: RetrievedChunk, client: Groq) -> float:
+    response = client.chat.completions.create(
         model=LLM_RERANK_MODEL,
         max_tokens=100,
-        system=RERANK_SYSTEM,
-        messages=[{"role": "user", "content": RERANK_PROMPT.format(
-            question=question,
-            source_file=chunk.source_file,
-            text=chunk.original_text[:800],
-        )}],
+        temperature=0,
+        messages=[
+            {"role": "system", "content": RERANK_SYSTEM},
+            {"role": "user",   "content": RERANK_PROMPT.format(
+                question=question,
+                source_file=chunk.source_file,
+                text=chunk.original_text[:800],
+            )},
+        ],
     )
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1].lstrip("json").strip()
     return float(json.loads(raw).get("score", 0))
@@ -234,8 +240,8 @@ def llm_rerank(
     chunks: list[RetrievedChunk],
     final_k: int = FINAL_K,
 ) -> list[RankedChunk]:
-    """LLM-based reranking — one Haiku call per chunk."""
-    client = Anthropic()
+    """LLM-based reranking — one Groq call per chunk (fallback when BGE unavailable)."""
+    client = Groq()
     ranked = []
     for chunk in chunks:
         score = _llm_score_chunk(question, chunk, client)
@@ -329,16 +335,15 @@ def rewrite_query(
     n: int = N_REWRITES,
     history: list[dict] | None = None,
 ) -> list[str]:
-    """Generate N alternative query phrasings, optionally grounded in conversation history."""
-    client = Anthropic()
+    """Generate N alternative query phrasings using Llama 3.3 70B via Groq."""
+    client = Groq()
 
-    # Build history summary for context (last 3 turns max)
     if history and len(history) >= 2:
-        turns = history[-6:]  # last 3 user+assistant pairs
+        turns = history[-6:]
         history_summary = ""
         for msg in turns:
             role = "User" if msg["role"] == "user" else "Assistant"
-            text = msg["content"][:300]  # truncate long assistant answers
+            text = msg["content"][:300]
             history_summary += f"{role}: {text}\n"
         prompt = REWRITE_PROMPT_WITH_HISTORY.format(
             history_summary=history_summary.strip(),
@@ -348,13 +353,16 @@ def rewrite_query(
     else:
         prompt = REWRITE_PROMPT.format(question=question, n=n)
 
-    response = client.messages.create(
-        model=REWRITE_MODEL,
+    response = client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         max_tokens=300,
-        system=REWRITE_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
+        temperature=0,
+        messages=[
+            {"role": "system", "content": REWRITE_SYSTEM},
+            {"role": "user",   "content": prompt},
+        ],
     )
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1].lstrip("json").strip()
     return json.loads(raw)[:n]
@@ -418,20 +426,18 @@ ANSWER_SYSTEM = """You are an expert CAPA and 8D problem-solving consultant with
 Answer questions precisely and practically, as an expert advising a quality engineer.
 - Give specific, actionable guidance — not generic descriptions
 - Reference specific disciplines (D3, D4, etc.) and tools by name when relevant
-- If the context contains worked examples, reproduce the specific facts, numbers, and findings from those examples directly — do not paraphrase or generalise
+- If the context contains worked examples, reference them to illustrate your answer
 - If the question asks about a step or decision, explain both what to do AND common mistakes to avoid
 - Be direct — quality engineers need clear answers, not hedged summaries
+- CRITICAL — FACTUAL RECALL RULE: If the question asks about specific findings, results, or details from a named case or example (e.g. "what did the automotive 8D team find", "walk me through the 5 Whys for the steering column defect", "what did the SEM analysis show"), your answer MUST reproduce the specific factual content from the retrieved example chunks — do NOT generate generic how-to guidance. Reproduce the actual chain, findings, or results verbatim from the context. A question phrased as "walk me through X" about a specific case is asking for the facts of that case, not general methodology.
 
-CRITICAL — GROUNDEDNESS RULE (read carefully, every point matters):
+CRITICAL — GROUNDEDNESS RULE:
 - Base your answer ONLY on the provided knowledge base context chunks
-- Every claim must be directly traceable to a specific chunk in the context
-- Do NOT add introductory phrases like "Great question", "In quality management...", or "It is important to note that..."
-- Do NOT add concluding summaries or transitional filler — end when the answer is complete
-- Do NOT add generic quality management advice (e.g. "engage cross-functional teams", "ensure management buy-in", "conduct training", "foster a culture of quality") unless those exact concepts appear in the retrieved context with specific guidance
-- Do NOT substitute from general knowledge when a chunk is incomplete — omit the missing detail entirely
-- If a sequential process (like 5 Whys steps or a numbered checklist) is in the context, reproduce it in full in the correct order — do not summarise or skip steps
+- Every numbered point or claim must be directly traceable to a specific chunk in the context
+- If a topic is not covered in the retrieved chunks, omit it entirely — do not add it from general knowledge
+- Do NOT add generic quality management advice (e.g. "engage cross-functional teams", "conduct training", "management oversight") unless those exact concepts appear in the retrieved context with specific guidance
+- If the question cannot be fully answered from the context, say something like: "Based on the available documentation, I can cover [topics]. For [missing topic], I'd recommend consulting [relevant standard or resource] directly for authoritative guidance."
 - Shorter, fully-grounded answers are better than longer answers that mix grounded and ungrounded content
-- If the question cannot be fully answered from the context, say: "Based on the available documentation, I can cover [topics]. For [missing topic], consult [relevant standard] directly."
 
 At the end of your answer, list the sources you drew from as: [Source: filename]"""
 
@@ -469,22 +475,19 @@ def generate_answer(
     chunks: list[RankedChunk],
     history: list[dict] | None = None,
 ) -> str:
-    """Generate an expert answer, optionally with conversation history for follow-ups."""
-    client = OpenAI()
+    """Generate an expert answer using Llama 3.3 70B via Groq API.
+    Drop-in replacement for GPT-4o-mini — same interface, same prompt structure.
+    """
+    client = Groq()
     context = build_context(chunks)
 
     if history and len(history) >= 2:
-        # Build messages: system + last N turns + current question with context
         messages = [{"role": "system", "content": ANSWER_SYSTEM}]
-
-        # Include last 4 turns (2 user + 2 assistant) for context
         for msg in history[-4:]:
             messages.append({
                 "role": msg["role"],
-                "content": msg["content"][:800],  # truncate long turns
+                "content": msg["content"][:800],
             })
-
-        # Add current question with retrieved context
         messages.append({
             "role": "user",
             "content": ANSWER_PROMPT_FOLLOWUP.format(
@@ -569,7 +572,7 @@ def check_groundedness(
         return answer_text, 1.0
 
     try:
-        client = Anthropic()
+        client = Groq()
 
         # Build compact context summary (headline + first 150 chars per chunk)
         context_parts = []
@@ -579,18 +582,21 @@ def check_groundedness(
             )
         context_summary = "\n".join(context_parts)
 
-        response = client.messages.create(
-            model="claude-haiku-4-5",
+        response = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
             max_tokens=1500,
-            system=GROUNDEDNESS_SYSTEM,
-            messages=[{"role": "user", "content": GROUNDEDNESS_PROMPT.format(
-                question=question,
-                context_summary=context_summary,
-                answer=answer_text[:2000],
-            )}],
+            temperature=0,
+            messages=[
+                {"role": "system", "content": GROUNDEDNESS_SYSTEM},
+                {"role": "user",   "content": GROUNDEDNESS_PROMPT.format(
+                    question=question,
+                    context_summary=context_summary,
+                    answer=answer_text[:2000],
+                )},
+            ],
         )
 
-        raw = response.content[0].text.strip()
+        raw = response.choices[0].message.content.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1].lstrip("json").strip()
 
