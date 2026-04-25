@@ -27,6 +27,9 @@ knowledge-base/markdown/*.md
 !knowledge-base/markdown/README.md
 knowledge-base/raw_docs/
 
+# Diagnostic results
+scripts/diagnostics/results
+
 # macOS
 .DS_Store
 

@@ -1,6 +1,6 @@
 """
 ingest.py — CAPA/8D Expert Knowledge Base Ingestion Pipeline
-LLM semantic chunking + OpenAI embeddings + Chroma
+Follows Ed Donner's day5 pattern: LLM semantic chunking + OpenAI embeddings + Chroma
 
 Architecture:
   1. Load all .md files from knowledge-base/markdown/
@@ -46,9 +46,8 @@ CHROMA_DIR         = Path("chroma_db")
 COLLECTION_NAME    = "capa_8d_expert"
 
 # Chunking params (tuned from evaluation experiments)
-CHUNK_SIZE         = 400    # tokens — reduced from 500 to stay within BGE 512-token limit
-                            # BGE tokenizer ~1.15× GPT tokens; 400×1.15 + enrichment ≈ 510 tokens
-CHUNK_OVERLAP      = 150    # tokens — proportionally reduced from 200
+CHUNK_SIZE         = 500    # tokens
+CHUNK_OVERLAP      = 200    # tokens
 
 # LLM for semantic enrichment
 ENRICHMENT_MODEL   = "claude-haiku-4-5"   # fast + cheap + excellent JSON
@@ -88,8 +87,9 @@ class EnrichedChunk:
     doc_category: str
     headline:     str   # LLM-generated: 1 sentence capturing the main concept
     summary:      str   # LLM-generated: 2-3 sentence contextual summary
+    practitioner_queries: list  # LLM-generated: 3 practitioner-phrased questions this chunk answers
     original_text: str  # the raw chunk text
-    embed_text:   str   # headline + summary + original_text (what gets embedded)
+    embed_text:   str   # headline + summary + queries + original_text (what gets embedded)
     token_count:  int
     chunk_index:  int
     total_chunks: int
@@ -178,10 +178,7 @@ def get_category(filename: str) -> str:
 
 def load_documents(kb_dir: Path) -> list[RawChunk]:
     """Load all .md files and split into raw token-aware chunks."""
-    md_files = sorted(
-        f for f in kb_dir.glob("*.md")
-        if f.name != "README.md"   # README.md is a git placeholder, not a KB document
-    )
+    md_files = sorted(kb_dir.glob("*.md"))
     if not md_files:
         raise FileNotFoundError(f"No .md files found in {kb_dir}")
 
@@ -217,6 +214,7 @@ ENRICHMENT_SYSTEM = """You are a quality management expert helping build a RAG k
 For each text chunk provided, return a JSON object with exactly these fields:
 - "headline": A single precise sentence (max 20 words) capturing the main concept or rule in this chunk. Write it as a standalone statement a quality engineer could search for.
 - "summary": 2-3 sentences of contextual explanation that would help retrieve this chunk for relevant questions. Include key terms, discipline names (D0-D8), standards (ISO 9001, IATF 16949), and tool names.
+- "practitioner_queries": A list of exactly 3 short questions that a quality engineer might ask when they need the information in this chunk. Use conversational, real-world phrasing — the kind of language someone would use when they have an urgent problem, not formal terminology. Examples: "what do I check when my customer finds parts?", "how do I handle a supplier who won't respond?", "can I close the CAPA if the defect disappeared?". Each question must be answerable from this chunk specifically.
 
 Return ONLY valid JSON. No preamble, no markdown fences, no explanation."""
 
@@ -227,7 +225,7 @@ Position: chunk {chunk_index} of {total_chunks}
 TEXT:
 {text}
 
-Return JSON with "headline" and "summary" fields only."""
+Return JSON with "headline", "summary", and "practitioner_queries" fields only."""
 
 
 @retry(
@@ -247,7 +245,7 @@ def enrich_chunk(chunk: RawChunk, client: Anthropic) -> EnrichedChunk:
 
     response = client.messages.create(
         model=ENRICHMENT_MODEL,
-        max_tokens=300,
+        max_tokens=450,
         temperature=ENRICHMENT_TEMP,
         system=ENRICHMENT_SYSTEM,
         messages=[{"role": "user", "content": prompt}],
@@ -263,11 +261,20 @@ def enrich_chunk(chunk: RawChunk, client: Anthropic) -> EnrichedChunk:
     raw = raw.strip()
 
     parsed = json.loads(raw)
-    headline = parsed.get("headline", "").strip()
-    summary  = parsed.get("summary", "").strip()
+    headline  = parsed.get("headline", "").strip()
+    summary   = parsed.get("summary", "").strip()
+    queries   = parsed.get("practitioner_queries", [])
 
-    # Build the embed text: headline + summary + original (order matters for retrieval)
-    embed_text = f"{headline}\n\n{summary}\n\n{chunk.text}"
+    # Normalise: ensure list of strings, max 3
+    if isinstance(queries, list):
+        queries = [str(q).strip() for q in queries if q][:3]
+    else:
+        queries = []
+
+    # Build the embed text: headline + summary + practitioner queries + original
+    # Queries act as a semantic bridge between formal SOP language and conversational phrasing
+    queries_text = "\n".join(f"Q: {q}" for q in queries)
+    embed_text = f"{headline}\n\n{summary}\n\n{queries_text}\n\n{chunk.text}"
 
     return EnrichedChunk(
         chunk_id=chunk.chunk_id,
@@ -275,6 +282,7 @@ def enrich_chunk(chunk: RawChunk, client: Anthropic) -> EnrichedChunk:
         doc_category=chunk.doc_category,
         headline=headline,
         summary=summary,
+        practitioner_queries=queries,
         original_text=chunk.text,
         embed_text=embed_text,
         token_count=count_tokens(embed_text),
@@ -297,6 +305,7 @@ def enrich_all_chunks(
                 doc_category=c.doc_category,
                 headline=f"[DRY RUN] {c.source_file} chunk {c.chunk_index}",
                 summary="[DRY RUN] No enrichment in dry-run mode.",
+                practitioner_queries=[],
                 original_text=c.text,
                 embed_text=c.text,
                 token_count=c.token_count,
@@ -358,13 +367,14 @@ def embed_all_chunks(
 def build_metadata(chunk: EnrichedChunk) -> dict:
     """Build Chroma metadata dict — all values must be str/int/float/bool."""
     return {
-        "source_file":   chunk.source_file,
-        "doc_category":  chunk.doc_category,
-        "headline":      chunk.headline,
-        "summary":       chunk.summary,
-        "chunk_index":   chunk.chunk_index,
-        "total_chunks":  chunk.total_chunks,
-        "token_count":   chunk.token_count,
+        "source_file":          chunk.source_file,
+        "doc_category":         chunk.doc_category,
+        "headline":             chunk.headline,
+        "summary":              chunk.summary,
+        "practitioner_queries": " | ".join(chunk.practitioner_queries),  # stored as pipe-separated string
+        "chunk_index":          chunk.chunk_index,
+        "total_chunks":         chunk.total_chunks,
+        "token_count":          chunk.token_count,
     }
 
 

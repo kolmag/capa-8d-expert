@@ -97,35 +97,35 @@ Evaluated against **197 test questions** across 3 independent sources:
 
 The eval framework calculates MRR only for questions with `expected_sources` defined. Of 197 questions, 48 structured questions (t001–t048) have expected sources — the remaining 149 blind questions (t051–t197) have `expected_sources=[]` and always score MRR=0 by design. The headline MRR figure (0.198–0.203) is therefore not a retrieval quality metric — it is a structural artefact of the eval design. The meaningful retrieval metric is MRR on structured questions only (~0.80–0.92 depending on run). Judge scores (correctness, completeness, groundedness) are valid across all 197 questions.
 
-### Full 197-question eval — three runs compared
+### Full 197-question eval — four runs compared
 
-| Metric | Baseline (Apr 20) | FINDING anchors (Apr 21) | Guardrails + Markdown (Apr 24) | vs Baseline |
-|---|---|---|---|---|
-| Judge — Overall | 6.926 | 6.774 | **7.094** | **+0.168** |
-| Judge — Correctness | 7.412 | 7.246 | **7.426** | +0.014 |
-| Judge — Completeness | 6.268 | 6.149 | **6.369** | +0.101 |
-| Judge — Groundedness | 7.098 | 6.928 | **7.487** | **+0.389** |
-| Mean top chunk score | 4.049 | 4.048 | **5.120** | **+1.071** |
-| Source coverage rate | 99.0% | 96.9% | 95.9% | -3.1% |
-| Checker score | 0.665 | 0.651 | 0.636 | -0.029 |
+| Metric | Baseline (Apr 20) | FINDING anchors (Apr 21) | Guardrails + Markdown (Apr 24) | Final (Apr 25) | vs Baseline |
+|---|---|---|---|---|---|
+| Judge — Overall | 6.926 | 6.774 | 7.094 | **7.121** | **+0.195** ✅ |
+| Judge — Correctness | 7.412 | 7.246 | 7.426 | **7.441** | +0.029 → |
+| Judge — Completeness | 6.268 | 6.149 | 6.369 | **6.467** | **+0.199** ✅ |
+| Judge — Groundedness | 7.098 | 6.928 | 7.487 | **7.456** | **+0.358** ✅ |
+| Mean top chunk score | 4.049 | 4.048 | 5.120 | **4.424** | **+0.375** ✅ |
+| Source coverage rate | 99.0% | 96.9% | 95.9% | 96.4% | -2.6% → |
+| Checker score | 0.665 | 0.651 | 0.636 | **0.671** | +0.006 → |
 
-### By category — baseline vs current best
+### By category — full iteration history
 
-| Category | Baseline | Apr 21 | Apr 24 | vs Baseline |
-|---|---|---|---|---|
-| enriched_content | 8.220 | 7.890 | **8.670** | **+0.450** ✅ |
-| example | 4.670 | 6.330 | **6.420** | **+1.750** ✅ |
-| FMEA | 6.840 | 6.180 | **7.350** | **+0.510** ✅ |
-| RCA | 7.620 | 7.370 | **7.980** | **+0.360** ✅ |
-| mixed | 6.360 | 6.560 | **6.920** | **+0.560** ✅ |
-| compliance | 6.710 | 6.730 | **7.040** | **+0.330** ✅ |
-| 8D_methodology | 6.670 | 6.860 | **6.880** | +0.210 ✅ |
-| CAPA_procedure | 6.050 | 5.650 | 6.240 | +0.190 → |
-| VoE | 6.970 | 6.610 | 6.700 | -0.270 ❌ |
-| containment | 7.620 | 7.350 | 7.260 | -0.360 ❌ |
-| edge_case | 7.110 | 7.030 | 6.580 | -0.530 ❌ |
+| Category | Baseline | Apr 21 | Apr 24 | **Final (Apr 25)** | vs Baseline |
+|---|---|---|---|---|---|
+| containment | 7.620 | 7.350 | 7.260 | **8.200** | **+0.580** ✅ |
+| compliance | 6.710 | 6.730 | 7.040 | **7.250** | **+0.540** ✅ |
+| mixed | 6.360 | 6.560 | 6.920 | **6.920** | **+0.560** ✅ |
+| example | 4.670 | 6.330 | 6.420 | **6.250** | **+1.580** ✅ |
+| RCA | 7.620 | 7.370 | 7.980 | **7.910** | **+0.290** ✅ |
+| edge_case | 7.110 | 7.030 | 6.580 | **7.250** | **+0.140** ✅ |
+| 8D_methodology | 6.670 | 6.860 | 6.880 | **6.710** | +0.040 → |
+| CAPA_procedure | 6.050 | 5.650 | 6.240 | **6.050** | 0.000 → |
+| VoE | 6.970 | 6.610 | 6.700 | **6.740** | -0.230 ❌ |
+| FMEA | 6.840 | 6.180 | 7.350 | **6.590** | -0.250 ❌ |
+| enriched_content | 8.220 | 7.890 | 8.670 | **7.670** | -0.550 ❌ |
 
-**Interpretation:** Apr 24 run is the new best overall (7.094 vs baseline 6.926). Groundedness +0.389 confirms the ANSWER_SYSTEM guardrails are reducing GPT-4o-mini padding. top_chunk_score +1.071 confirms markdown-aware chunking produces better BGE-scored chunks. Seven categories improved vs baseline; three regressed (`VoE`, `containment`, `edge_case`) — these are the targets for the next iteration. Pending fix: `CHUNK_SIZE` reduction from 500 → 400 tokens to address BGE 512-token truncation risk (BGE tokenizer ~1.15× GPT token count).
+**Interpretation:** Apr 25 is the final best overall (7.121, +0.195 vs baseline). Containment is the star of the final run — 8.200, the highest single-category score in the project, recovered from 7.260 (Apr 24 regression) by adding practitioner scenario content. Seven categories improved vs baseline. Three regressions remain: `VoE` (-0.230), `FMEA` (-0.250), `enriched_content` (-0.550). The enriched_content drop from 8.67 (Apr 24) to 7.67 is the largest unresolved issue — the new KB additions may be competing with the hand-enriched documents. Deferred to next iteration. Groundedness +0.358 vs baseline confirms the ANSWER_SYSTEM anti-padding guardrails are working.
 
 ### Example category iteration (4 questions, tracked separately)
 
@@ -268,17 +268,20 @@ After any KB change:
 
 ### Known limitations
 
-**t019 (5 Whys walk-through) — generation quality**
-MRR=1.0 and top_chunk_score=9.71 (perfect retrieval) but judge overall=5.3/10 (improved from 3.3 with markdown chunking). The LLM now retrieves the complete 5 Whys chain and produces more of it, but completeness remains below target. Checker score 0.28 indicates the checker is still stripping content. Next fix: further tighten the sequential process instruction in ANSWER_SYSTEM.
+**`enriched_content` regression — unresolved**
+enriched_content dropped from 8.670 (Apr 24) to 7.670 (Apr 25 final). These are the hand-enriched documents that previously scored highest. The new KB additions (containment practitioner scenarios, synthetic query enrichment across all documents) may be competing with them. Root cause not yet diagnosed. Next investigation: Sc per-query analysis on enriched_content questions to identify which categories are competing.
 
-**`edge_case`, `containment` — below baseline**
-After all iterations: edge_case 6.75 (baseline 7.11, -0.36), containment 7.09 (baseline 7.62, -0.53). VoE recovered to 7.32 (+0.35 vs baseline) after CHUNK_SIZE=400 fix. Root cause for remaining gaps: blind questions use conversational/scenario phrasing ("supplier ghosted us", "issue disappears before verification") that doesn't map to formal SOP vocabulary. BGE top_chunk_scores for these categories average 3.3–3.8 vs 7–9 for well-performing categories. Fix: synthetic query enrichment — add practitioner question phrasings to embed_text during ingest so BGE can bridge the vocabulary gap.
+**VoE and FMEA — below baseline**
+VoE: 6.970 baseline → 6.740 final (-0.230). FMEA: 6.840 baseline → 6.590 final (-0.250). Both have stable MRR — retrieval is not the issue. Generation quality regressions from re-ingest headline changes. Mitigation: further ANSWER_SYSTEM tightening for sequential/technical content.
 
-**compliance ↔ example retrieval competition risk**
-Sc analysis shows mean cosine similarity of 0.656 between compliance and example chunks — highest cross-category competition risk in the KB. IATF 16949 D7/PFMEA requirement content overlaps vocabulary with the automotive example's D7 section. Not yet causing eval failures but flagged for monitoring. Mitigation: FINDING anchors in example documents provide case-specific vocabulary that should outscore compliance chunks for example-specific queries.
+**t019 (5 Whys walk-through) — completeness gap**
+MRR=1.0, top_chunk=9.71 (perfect retrieval), judge overall=5.3. Checker score 0.28 — the checker is still stripping content. The markdown chunking improved this from 3.3 to 5.3 but completeness remains below target. Root cause: GPT-4o-mini partially summarises the chain despite the sequential process instruction. Next fix: stronger sequential reproduction instruction with explicit chain format example.
 
 **`general` category structural overlap — resolved**
-Previous runs showed 17% of general chunks within distance 5 of example chunks. After FINDING anchors + CHUNK_SIZE=400: 0% overlap confirmed by both t-SNE (0 stragglers) and Sc heatmap (example ↔ general mean Sc = 0.502, lowest cross-category pair).
+Previous runs showed 17% of general chunks within distance 5 of example chunks. Final state: 0% overlap confirmed by t-SNE (0 stragglers) and Sc heatmap (example ↔ general mean Sc = 0.527 — lowest cross-category pair).
+
+**compliance ↔ example retrieval competition — resolved**
+Previous Sc 0.656 (high risk). Post-synthetic query enrichment: 0.562 (resolved). IATF 16949 D7/PFMEA content no longer competes meaningfully with automotive example D7 chunks.
 
 ---
 
