@@ -46,8 +46,9 @@ CHROMA_DIR         = Path("chroma_db")
 COLLECTION_NAME    = "capa_8d_expert"
 
 # Chunking params (tuned from evaluation experiments)
-CHUNK_SIZE         = 500    # tokens
-CHUNK_OVERLAP      = 200    # tokens
+CHUNK_SIZE         = 400    # treduced from 500 — stays within BGE 512-token limit
+                            # (BGE tokenizer ~1.15× GPT; 400×1.15 + enrichment ≈ 510 tokens)
+CHUNK_OVERLAP      = 150    # toproportionally reduced from 200
 
 # LLM for semantic enrichment
 ENRICHMENT_MODEL   = "claude-haiku-4-5"   # fast + cheap + excellent JSON
