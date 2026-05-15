@@ -47,6 +47,14 @@ def test_eval_and_runtime_models_match_current_oss_stack():
     assert all("gpt-4o" not in model and "haiku" not in model for model in [ANSWER_MODEL, REWRITE_MODEL, LLM_RERANK_MODEL])
 
 
+def test_standalone_app_can_label_selected_model_stack():
+    spec = importlib.util.spec_from_file_location("standalone_app", ROOT / "scripts" / "app.py")
+    app = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(app)
+
+    assert app.model_stack_label("legacy_mixed").startswith("Validated benchmark stack")
+
+
 def test_ingest_skips_markdown_readme():
     from capa_8d_expert import ingest
 
