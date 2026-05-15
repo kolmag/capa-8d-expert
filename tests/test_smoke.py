@@ -21,6 +21,20 @@ def test_eval_defaults_to_tracked_v3_tests():
     assert Path("evaluation/tests_v3.jsonl").exists()
 
 
+def test_eval_and_runtime_models_match_current_oss_stack():
+    spec = importlib.util.spec_from_file_location("eval_mod", ROOT / "evaluation" / "eval.py")
+    eval_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eval_mod)
+
+    from capa_8d_expert.answer import ANSWER_MODEL, LLM_RERANK_MODEL, REWRITE_MODEL, OSS_120B_MODEL, OSS_20B_MODEL
+
+    assert eval_mod.JUDGE_MODEL == "claude-sonnet-4-6"
+    assert ANSWER_MODEL == REWRITE_MODEL == OSS_120B_MODEL == "groq/openai/gpt-oss-120b"
+    assert LLM_RERANK_MODEL == OSS_20B_MODEL == "groq/openai/gpt-oss-20b"
+    assert "4-5" not in eval_mod.JUDGE_MODEL
+    assert all("gpt-4o" not in model and "haiku" not in model for model in [ANSWER_MODEL, REWRITE_MODEL, LLM_RERANK_MODEL])
+
+
 def test_ingest_skips_markdown_readme():
     from capa_8d_expert import ingest
 
