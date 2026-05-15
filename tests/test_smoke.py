@@ -32,3 +32,10 @@ def test_ingest_skips_markdown_readme():
 def test_stale_standalone_rag_scripts_do_not_reappear():
     assert not (ROOT / "scripts" / "answer_groq.py").exists()
     assert not (ROOT / "scripts" / "answer_original.py").exists()
+
+
+def test_browser_style_citation_artifacts_are_removed():
+    from capa_8d_expert.answer import clean_citation_artifacts
+
+    text = "Is/Is Not narrows the cause space \u30101\u2020L1-L4\u3011 before RCA ."
+    assert clean_citation_artifacts(text) == "Is/Is Not narrows the cause space before RCA."

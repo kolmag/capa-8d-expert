@@ -320,7 +320,7 @@ Previous Sc 0.656 (high risk). Post-synthetic query enrichment: 0.562 (resolved)
 ### Prerequisites
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
-- OpenAI API key + Anthropic API key
+- OpenAI API key + Groq API key + Anthropic API key
 - Langfuse account + project keys, optional for tracing
 
 ### Install
@@ -333,6 +333,7 @@ uv sync
 Create `.env`:
 ```
 OPENAI_API_KEY=sk-...
+GROQ_API_KEY=gsk_...
 ANTHROPIC_API_KEY=sk-ant-...
 LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
