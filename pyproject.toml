@@ -13,8 +13,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "gradio>=5.0.0",
     "pydantic>=2.0.0",
-    # BGE reranker — install separately if you want local reranking:
-    # uv add torch transformers
+    # BGE reranker runtime:
     # (~2GB download for torch, ~570MB for the model on first run)
     "torch>=2.11.0",
     "transformers>=5.3.0",
