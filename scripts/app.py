@@ -95,9 +95,10 @@ def format_sources_panel(result: AnswerResult) -> str:
     )
     parts = [
         f'<div style="font-size:12px;color:#888;margin-bottom:12px;">'
-        f'{len(result.ranked_chunks)} chunks · {len(result.sources)} documents'
+        f'{len(result.ranked_chunks)} chunks · {len(result.sources)} documents '
         f'{reranker_badge}'
-        f'<span style="margin-left:8px;">{model_stack_label(result.model_stack)}</span></div>'
+        f'<span style="margin-left:8px;">{model_stack_label(result.model_stack)}</span>'
+        f'</div>'
     ]
 
     for chunk in result.ranked_chunks:

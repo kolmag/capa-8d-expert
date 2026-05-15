@@ -73,3 +73,6 @@ def test_browser_style_citation_artifacts_are_removed():
 
     text = "Is/Is Not narrows the cause space \u30101\u2020L1-L4\u3011 before RCA ."
     assert clean_citation_artifacts(text) == "Is/Is Not narrows the cause space before RCA."
+
+    repeated_sources = "[Source: containment_decision_guide.md][Source: containment_decision_guide.md]"
+    assert clean_citation_artifacts(repeated_sources) == "[Source: containment_decision_guide.md]"

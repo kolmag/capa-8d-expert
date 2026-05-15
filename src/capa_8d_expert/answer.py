@@ -563,6 +563,7 @@ def build_context(chunks: list[RankedChunk]) -> str:
 def clean_citation_artifacts(text: str) -> str:
     """Remove citation markers invented from browser-style source formatting."""
     text = re.sub(r"【[^】]*†[^】]*】", "", text)
+    text = re.sub(r"(\[Source:\s*([^\]]+)\])(?:\s*\[Source:\s*\2\])+", r"\1", text)
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\s+([.,;:])", r"\1", text)
     return text.strip()
