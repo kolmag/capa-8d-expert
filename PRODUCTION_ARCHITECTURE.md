@@ -15,13 +15,13 @@ This document describes the known gaps between the current portfolio implementat
 | UI | Gradio Blocks + streaming | Rapid iteration, built-in chat interface, zero frontend overhead |
 | Vector store | Chroma (local) | Zero setup, persistent SQLite backing, sufficient for <10K chunks |
 | Reranker | BAAI/bge-reranker-v2-m3 (local, MPS) | Free, no API dependency, ~2x better than embedding-only retrieval |
-| Answer generation | GPT-4o-mini | Cost-effective, reliable instruction following, good on formal standards |
-| Query rewriting | Claude Haiku 4.5 | Fast, precise JSON output, model diversity vs generator |
-| Groundedness checker | Claude Haiku 4.5 | Independent perspective from generator, catches hallucinated claims |
+| Answer generation | gpt-oss-120b via Groq | SICC-aligned runtime, strong low-latency generation |
+| Query rewriting | gpt-oss-120b via Groq | Same production runtime as answer generation for query expansion |
+| Groundedness checker | gpt-oss-20b via Groq | Smaller critic model for fast claim-level cleanup |
 | Observability | Langfuse | Trace-level debugging already implemented — production-ready pattern |
 | State | `gr.State` (in-memory) | Sufficient for single-user demo; not suitable for multi-user production |
 
-The multi-LLM stack (GPT-4o-mini generator + Haiku checker) is a deliberate architectural decision, not a cost oversight. Model diversity between generator and critic reduces self-leniency — a single model checking its own output has the same blind spots as when it generated it. Benchmark results confirm this: Llama 3.3 70B full-stack (same model for all three roles) scored -0.179 overall vs the mixed stack, with the largest drops on compliance-heavy content (-0.920 on `compliance` category).
+The current stack keeps generation and criticism separated by model size: gpt-oss-120b handles rewrite and answer generation, while gpt-oss-20b handles groundedness cleanup and fallback reranking. Historical benchmarks with GPT-4o-mini, Claude Haiku, and Llama 3.3 70B remain useful regression references, but they are no longer the live runtime configuration.
 
 ---
 
@@ -37,8 +37,8 @@ graph TD
     Critic[Groundedness Critic]
     Postgres[(PostgreSQL — 8D State + Users)]
     VectorDB[(Qdrant Cloud / Pinecone)]
-    Groq[Groq — Llama 3.3 70B]
-    Anthropic[Anthropic — Claude Sonnet]
+    Groq[Groq — gpt-oss-120b / gpt-oss-20b]
+    Anthropic[Anthropic — Claude Sonnet 4.6 for evaluation]
 
     Client -- SSE Stream --> API
     API --> Router
@@ -112,9 +112,9 @@ tools = [
 **State persistence:** LangGraph `SqliteSaver` for development, PostgreSQL checkpointer for production. Session state survives pod restarts.
 
 **Model routing in the agentic layer:**
-- Llama 3.3 70B via Groq for high-speed generation and synthesis (fast, cheap)
-- Claude Sonnet for complex reasoning steps (orchestration decisions, multi-step tool use)
-- Claude Haiku for JSON-constrained tasks (query rewriting, groundedness checking) — preserving model diversity
+- gpt-oss-120b via Groq for high-speed generation, query rewriting, and synthesis
+- gpt-oss-20b via Groq for lightweight criticism, groundedness checks, and fallback reranking
+- Claude Sonnet 4.6 for evaluation judging and occasional complex orchestration benchmarks
 
 ---
 

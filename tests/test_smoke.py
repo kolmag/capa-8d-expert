@@ -27,3 +27,8 @@ def test_ingest_skips_markdown_readme():
     docs = ingest.load_documents(ROOT / "knowledge-base" / "markdown")
     assert docs
     assert "README.md" not in {doc.source_file for doc in docs}
+
+
+def test_stale_standalone_rag_scripts_do_not_reappear():
+    assert not (ROOT / "scripts" / "answer_groq.py").exists()
+    assert not (ROOT / "scripts" / "answer_original.py").exists()

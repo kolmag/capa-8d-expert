@@ -125,9 +125,9 @@ The eval framework calculates MRR only for questions with `expected_sources` def
 | FMEA | 6.840 | 6.180 | 7.350 | **6.590** | -0.250 ❌ |
 | enriched_content | 8.220 | 7.890 | 8.670 | **7.670** | -0.550 ❌ |
 
-### Model benchmark — GPT-4o-mini + Haiku vs Llama 3.3 70B full-stack (Groq)
+### Historical model benchmark — GPT-4o-mini + Haiku vs Llama 3.3 70B full-stack (Groq)
 
-Same 197-question test set, same BGE reranker, same Sonnet 4.5 judge. Only variable: answer generation + query rewriting + groundedness checker.
+Same 197-question test set, same BGE reranker, same Sonnet 4.6 judge. Only variable: answer generation + query rewriting + groundedness checker. This benchmark is retained as project history; the current runtime stack now uses the SICC-aligned `gpt-oss-120b` / `gpt-oss-20b` configuration shown above.
 
 | Metric | GPT-4o-mini + Claude Haiku | Llama 3.3 70B (Groq, full-stack) | Delta |
 |---|---|---|---|
@@ -153,7 +153,7 @@ Same 197-question test set, same BGE reranker, same Sonnet 4.5 judge. Only varia
 - Llama 3.3 70B is 52% cheaper and competitive on general methodology questions
 - GPT-4o-mini + Haiku wins significantly on compliance-heavy and enriched content categories — formal standards vocabulary (ISO, IATF clause language) favours GPT-4o-mini
 - Llama's checker is stricter on its own output (checker_score 0.590 vs 0.671) — no self-leniency detected. The groundedness drop is real generation quality, not false confidence
-- **Recommendation for production:** Llama 3.3 70B as generator with Claude Haiku as rewriter/checker (preserving model diversity) is the next benchmark to run. Expected to recover most of the compliance gap while retaining the cost advantage
+- **Current production direction:** gpt-oss-120b for rewriting and answer generation, with gpt-oss-20b for groundedness checking and fallback reranking. Historical benchmark results remain useful regression references when model stacks change.
 
 *Note: latency measured on M1 8GB with shared memory pressure during eval. Median is the reliable metric — max latency (1698s) reflects OS competition for unified memory, not model performance.*
 
@@ -177,7 +177,7 @@ Same 197-question test set, same BGE reranker, same Sonnet 4.5 judge. Only varia
 Each chunk is enriched at ingest with a Claude Haiku-generated headline and summary. Embedding = `headline + summary + original_text`. Improves retrieval for questions phrased differently from source material.
 
 **2. BGE cross-encoder reranking**
-`BAAI/bge-reranker-v2-m3` runs locally (free, no API). Reranks merged candidates to 15. ~2s after warmup. Falls back to Claude Haiku if torch is unavailable. `RETRIEVAL_K=30` gives a broader candidate pool.
+`BAAI/bge-reranker-v2-m3` runs locally (free, no API). Reranks merged candidates to 15. ~2s after warmup. Falls back to gpt-oss-20b LLM scoring if torch is unavailable. `RETRIEVAL_K=30` gives a broader candidate pool.
 
 **3. Groundedness post-checker**
 After answer generation, gpt-oss-20b audits each claim against retrieved chunks and strips anything ungrounded. Only fires when top BGE score ≥ 0.5 — skips pure synthesis queries where claim-level checking is too aggressive.
@@ -464,7 +464,7 @@ Replace Gradio's stateful process with a RESTful FastAPI backend. Streaming via 
 Migrate from local Chroma to managed vector store (Qdrant Cloud or Pinecone) to decouple embeddings from compute. Offload BGE reranker to a dedicated GPU microservice or replace with Cohere Rerank v3.5 managed API — eliminates the M1/8GB RAM constraint entirely.
 
 ### Phase 3 — Agentic Orchestration (LangGraph)
-Transition from the current static pipeline (`answer.py`) to a stateful multi-actor system. Router agent evaluates intent: KB question vs. 8D state read/write vs. ERP integration. Tool calling for database reads/writes, QMS push, and ERP inventory queries. Model routing: Llama 3.3 70B via Groq for generation, Claude Haiku for JSON-constrained tasks (query rewriting, groundedness checking).
+Transition from the current static pipeline (`answer.py`) to a stateful multi-actor system. Router agent evaluates intent: KB question vs. 8D state read/write vs. ERP integration. Tool calling for database reads/writes, QMS push, and ERP inventory queries. Model routing: gpt-oss-120b via Groq for generation and query rewriting, gpt-oss-20b for lightweight criticism and fallback scoring, and Claude Sonnet 4.6 for evaluation judging.
 
 ### Phase 4 — Automated KB Ingestion
 SOPs are living documents. CI/CD for knowledge: GitHub Action or Airflow DAG triggered on document updates. Pipeline: parse updated Markdown → Haiku semantic enrichment → embed → upsert to vector store (soft-delete outdated chunks). KB stays current without manual re-ingest.
