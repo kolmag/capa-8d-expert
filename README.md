@@ -28,7 +28,7 @@ Quality engineers ask questions in natural language. The system retrieves the mo
 User question
      │
      ▼
-Query Rewriting ── Claude Haiku generates 3 alternative phrasings (history-aware)
+Query Rewriting ── gpt-oss-120b generates 3 alternative phrasings (history-aware)
      │
      ▼
 Retrieval ── text-embedding-3-small + Chroma (top 30 per query × 4 queries)
@@ -38,12 +38,12 @@ Merge & Deduplicate ── union across queries, deduplicated by chunk ID
      │
      ▼
 Reranking ── BAAI/bge-reranker-v2-m3 (local, MPS/CUDA/CPU)
-     │         fallback: Claude Haiku LLM reranker
+    │         fallback: gpt-oss-20b LLM reranker
      ▼
-Answer Generation ── GPT-4o-mini with conversation history
+Answer Generation ── gpt-oss-120b with conversation history
      │
      ▼
-Groundedness Check ── Claude Haiku strips ungrounded claims
+Groundedness Check ── gpt-oss-20b strips ungrounded claims
      │
      ▼
 Expert answer with inline source citations
@@ -53,12 +53,12 @@ Expert answer with inline source citations
 
 | Component | Model / Tool |
 |---|---|
-| Query rewriting | Claude Haiku (`claude-haiku-4-5`) |
+| Query rewriting | `groq/openai/gpt-oss-120b` |
 | Embeddings | `text-embedding-3-small` (OpenAI) |
 | Vector store | Chroma (persistent, local) |
 | Reranker | `BAAI/bge-reranker-v2-m3` (HuggingFace, local) |
-| Answer generation | `gpt-4o-mini` (OpenAI) |
-| Groundedness check | Claude Haiku |
+| Answer generation | `groq/openai/gpt-oss-120b` |
+| Groundedness check | `groq/openai/gpt-oss-20b` |
 | Observability | Langfuse decorators when project keys are configured |
 | UI | Gradio 5.x / 6.x (streaming) |
 
@@ -180,7 +180,7 @@ Each chunk is enriched at ingest with a Claude Haiku-generated headline and summ
 `BAAI/bge-reranker-v2-m3` runs locally (free, no API). Reranks merged candidates to 15. ~2s after warmup. Falls back to Claude Haiku if torch is unavailable. `RETRIEVAL_K=30` gives a broader candidate pool.
 
 **3. Groundedness post-checker**
-After answer generation, Claude Haiku audits each claim against retrieved chunks and strips anything ungrounded. Only fires when top BGE score ≥ 0.5 — skips pure synthesis queries where claim-level checking is too aggressive.
+After answer generation, gpt-oss-20b audits each claim against retrieved chunks and strips anything ungrounded. Only fires when top BGE score ≥ 0.5 — skips pure synthesis queries where claim-level checking is too aggressive.
 
 **4. Streaming UI**
 Expert Q&A tab streams tokens as they arrive. Sources panel populates from retrieval sink before first token — no second API call needed. Gradio 6.x compatible.

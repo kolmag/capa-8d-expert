@@ -3,15 +3,15 @@ answer.py — CAPA/8D Expert Query Pipeline
 Follows Ed Donner's day5 pattern: rewrite → retrieve → merge → rerank → answer
 
 Pipeline:
-  1. rewrite_query    — generate N alternative phrasings with Claude Haiku
+  1. rewrite_query    — generate N alternative phrasings with gpt-oss-120b
   2. fetch_context    — retrieve K=20 candidates per query (original + rewritten) from Chroma
   3. merge            — deduplicate by chunk_id, union all results
   4. rerank           — BAAI/bge-reranker-v2-m3 (local HF cross-encoder), fallback to LLM
-  5. answer           — generate expert answer with GPT-4o-mini + source citations
+  5. answer           — generate expert answer with gpt-oss-120b + source citations
 
 Reranker strategy:
   Primary:  BAAI/bge-reranker-v2-m3 (HuggingFace, runs locally, free, fast)
-  Fallback: Claude Haiku LLM scoring (used if torch/transformers not installed)
+  Fallback: gpt-oss-20b LLM scoring (used if torch/transformers not installed)
 
 Usage:
     uv run scripts/answer.py "What should I do first when a customer reports a defect?"
@@ -38,7 +38,7 @@ except ImportError:
     pass
 
 import chromadb
-from anthropic import Anthropic
+from litellm import completion
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -55,9 +55,11 @@ except Exception:
 CHROMA_DIR      = Path("chroma_db")
 COLLECTION_NAME = "capa_8d_expert"
 
-REWRITE_MODEL   = "claude-haiku-4-5"    # fast query rewriting
-ANSWER_MODEL    = "gpt-4o-mini"         # answer generation
-LLM_RERANK_MODEL = "claude-haiku-4-5"  # fallback LLM reranker
+OSS_120B_MODEL   = "groq/openai/gpt-oss-120b"  # answer generation + query rewriting
+OSS_20B_MODEL    = "groq/openai/gpt-oss-20b"   # groundedness checker + fallback scoring
+REWRITE_MODEL    = OSS_120B_MODEL
+ANSWER_MODEL     = OSS_120B_MODEL
+LLM_RERANK_MODEL = OSS_20B_MODEL
 
 BGE_MODEL_NAME  = "BAAI/bge-reranker-v2-m3"  # HuggingFace cross-encoder
 
@@ -198,7 +200,7 @@ def bge_rerank(
         return [], False
 
 
-# ── LLM reranker (Claude Haiku fallback) ───────────────────────────────────────
+# ── LLM reranker (OSS-20B fallback) ────────────────────────────────────────────
 
 RERANK_SYSTEM = """You are a relevance scoring expert for a CAPA/8D quality management knowledge base.
 
@@ -221,18 +223,22 @@ Score this chunk's relevance to the question. Return JSON only."""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
-def _llm_score_chunk(question: str, chunk: RetrievedChunk, client: Anthropic) -> float:
-    response = client.messages.create(
+def _llm_score_chunk(question: str, chunk: RetrievedChunk) -> float:
+    response = completion(
         model=LLM_RERANK_MODEL,
+        messages=[
+            {"role": "system", "content": RERANK_SYSTEM},
+            {"role": "user", "content": RERANK_PROMPT.format(
+                question=question,
+                source_file=chunk.source_file,
+                text=chunk.original_text[:800],
+            )},
+        ],
+        temperature=0,
         max_tokens=100,
-        system=RERANK_SYSTEM,
-        messages=[{"role": "user", "content": RERANK_PROMPT.format(
-            question=question,
-            source_file=chunk.source_file,
-            text=chunk.original_text[:800],
-        )}],
+        stop=["```"],
     )
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1].lstrip("json").strip()
     return float(json.loads(raw).get("score", 0))
@@ -244,11 +250,10 @@ def llm_rerank(
     chunks: list[RetrievedChunk],
     final_k: int = FINAL_K,
 ) -> list[RankedChunk]:
-    """LLM-based reranking — one Haiku call per chunk."""
-    client = Anthropic()
+    """LLM-based reranking — one OSS-20B call per chunk."""
     ranked = []
     for chunk in chunks:
-        score = _llm_score_chunk(question, chunk, client)
+        score = _llm_score_chunk(question, chunk)
         ranked.append(RankedChunk(
             chunk_id=chunk.chunk_id,
             source_file=chunk.source_file,
@@ -341,8 +346,6 @@ def rewrite_query(
     history: list[dict] | None = None,
 ) -> list[str]:
     """Generate N alternative query phrasings, optionally grounded in conversation history."""
-    client = Anthropic()
-
     # Build history summary for context (last 3 turns max)
     if history and len(history) >= 2:
         turns = history[-6:]  # last 3 user+assistant pairs
@@ -359,13 +362,17 @@ def rewrite_query(
     else:
         prompt = REWRITE_PROMPT.format(question=question, n=n)
 
-    response = client.messages.create(
+    response = completion(
         model=REWRITE_MODEL,
+        messages=[
+            {"role": "system", "content": REWRITE_SYSTEM},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0,
         max_tokens=300,
-        system=REWRITE_SYSTEM,
-        messages=[{"role": "user", "content": prompt}],
+        stop=["```"],
     )
-    raw = response.content[0].text.strip()
+    raw = response.choices[0].message.content.strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1].lstrip("json").strip()
     return json.loads(raw)[:n]
@@ -483,11 +490,12 @@ def generate_answer(
     history: list[dict] | None = None,
 ) -> str:
     """Generate an expert answer, optionally with conversation history for follow-ups."""
-    client = OpenAI()
-    response = client.chat.completions.create(
+    response = completion(
         model=ANSWER_MODEL,
-        temperature=ANSWER_TEMP,
         messages=_build_answer_messages(question, chunks, history=history),
+        temperature=ANSWER_TEMP,
+        max_tokens=1200,
+        stop=["```"],
     )
     return response.choices[0].message.content.strip()
 
@@ -553,8 +561,6 @@ def check_groundedness(
         return answer_text, 1.0
 
     try:
-        client = Anthropic()
-
         # Build compact context summary (headline + first 150 chars per chunk)
         context_parts = []
         for i, chunk in enumerate(chunks[:10], 1):
@@ -563,18 +569,22 @@ def check_groundedness(
             )
         context_summary = "\n".join(context_parts)
 
-        response = client.messages.create(
-            model="claude-haiku-4-5",
+        response = completion(
+            model=OSS_20B_MODEL,
+            messages=[
+                {"role": "system", "content": GROUNDEDNESS_SYSTEM},
+                {"role": "user", "content": GROUNDEDNESS_PROMPT.format(
+                    question=question,
+                    context_summary=context_summary,
+                    answer=answer_text[:2000],
+                )},
+            ],
+            temperature=0,
             max_tokens=1500,
-            system=GROUNDEDNESS_SYSTEM,
-            messages=[{"role": "user", "content": GROUNDEDNESS_PROMPT.format(
-                question=question,
-                context_summary=context_summary,
-                answer=answer_text[:2000],
-            )}],
+            stop=["```"],
         )
 
-        raw = response.content[0].text.strip()
+        raw = response.choices[0].message.content.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1].lstrip("json").strip()
 
@@ -754,12 +764,12 @@ def answer_stream(
             "sources": sources,
         })
 
-    client = OpenAI()
     accumulated = ""
-    stream = client.chat.completions.create(
+    stream = completion(
         model=ANSWER_MODEL,
-        temperature=ANSWER_TEMP,
         messages=_build_answer_messages(question, ranked, history=history),
+        temperature=ANSWER_TEMP,
+        max_tokens=1200,
         stream=True,
     )
     for event in stream:

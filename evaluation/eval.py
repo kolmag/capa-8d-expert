@@ -40,7 +40,7 @@ from capa_8d_expert.answer import answer as run_answer
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-JUDGE_MODEL   = "claude-sonnet-4-5"   # stronger model for evaluation
+JUDGE_MODEL   = "claude-sonnet-4-6"   # stronger model for evaluation
 RESULTS_DIR   = Path("evaluation/results")
 MRR_K         = 10   # check top-K chunks for source coverage
 
