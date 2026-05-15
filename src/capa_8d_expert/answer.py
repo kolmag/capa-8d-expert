@@ -24,6 +24,7 @@ Usage:
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -451,6 +452,7 @@ CRITICAL — GROUNDEDNESS RULE (read carefully, every point matters):
 - If a sequential process (like 5 Whys steps or a numbered checklist) is in the context, reproduce it in full in the correct order — do not summarise or skip steps
 - Shorter, fully-grounded answers are better than longer answers that mix grounded and ungrounded content
 - If the question cannot be fully answered from the context, say: "Based on the available documentation, I can cover [topics]. For [missing topic], consult [relevant standard] directly."
+- Do NOT use browser-style citation markers, footnote links, or line-number citations. They are not valid in this app.
 
 At the end of your answer, list the sources you drew from as: [Source: filename]"""
 
@@ -482,6 +484,14 @@ def build_context(chunks: list[RankedChunk]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
+def clean_citation_artifacts(text: str) -> str:
+    """Remove citation markers invented from browser-style source formatting."""
+    text = re.sub(r"【[^】]*†[^】]*】", "", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"\s+([.,;:])", r"\1", text)
+    return text.strip()
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
 @observe(name="generate_answer", as_type="generation")
 def generate_answer(
@@ -497,7 +507,7 @@ def generate_answer(
         max_tokens=1200,
         stop=["```"],
     )
-    return response.choices[0].message.content.strip()
+    return clean_citation_artifacts(response.choices[0].message.content)
 
 
 # ── Step 5b: Groundedness post-check ──────────────────────────────────────────
@@ -552,7 +562,7 @@ def check_groundedness(
     """
     # Skip for very short answers — nothing to trim
     if len(answer_text) < 200:
-        return answer_text, 1.0
+        return clean_citation_artifacts(answer_text), 1.0
 
     # Skip if top chunk score is extremely low — pure synthesis query
     # where claim-level grounding check would be too aggressive
@@ -601,12 +611,12 @@ def check_groundedness(
         # Only use cleaned answer if meaningful removals were made
         # and the cleaned answer is substantive
         if removals > 0 and len(cleaned) > 100:
-            return cleaned, score
-        return answer_text, score
+            return clean_citation_artifacts(cleaned), score
+        return clean_citation_artifacts(answer_text), score
 
     except Exception:
         # Groundedness check failure is non-fatal — return original answer
-        return answer_text, 1.0
+        return clean_citation_artifacts(answer_text), 1.0
 
 
 # ── Full pipeline ──────────────────────────────────────────────────────────────
@@ -777,13 +787,13 @@ def answer_stream(
         if not delta:
             continue
         accumulated += delta
-        yield accumulated
+        yield clean_citation_artifacts(accumulated)
 
     cleaned, groundedness_score = check_groundedness(question, ranked, accumulated)
     if _sink is not None:
         _sink["checker_score"] = groundedness_score
         _sink["answer"] = cleaned
-    if cleaned != accumulated:
+    if cleaned != clean_citation_artifacts(accumulated):
         yield cleaned
 
 
