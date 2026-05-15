@@ -24,6 +24,17 @@ dependencies = [
     "groq>=1.2.0",
 ]
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+capa-8d-answer = "capa_8d_expert.answer:main"
+capa-8d-ingest = "capa_8d_expert.ingest:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/capa_8d_expert"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",

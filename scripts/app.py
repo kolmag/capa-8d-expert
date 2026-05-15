@@ -7,7 +7,6 @@ Usage:
     uv run scripts/app.py --share
 """
 
-import sys
 from pathlib import Path
 
 # Load .env from project root
@@ -20,8 +19,7 @@ except ImportError:
 
 import gradio as gr
 
-sys.path.insert(0, str(Path(__file__).parent))
-from answer import answer_stream, AnswerResult, _load_bge
+from capa_8d_expert.answer import answer_stream, AnswerResult, _load_bge
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 

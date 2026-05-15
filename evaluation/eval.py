@@ -18,7 +18,6 @@ Usage:
 import argparse
 import json
 import random
-import sys
 import time
 from dataclasses import dataclass, asdict
 from datetime import datetime
@@ -37,8 +36,7 @@ from anthropic import Anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm import tqdm
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from answer import answer as run_answer
+from capa_8d_expert.answer import answer as run_answer
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
