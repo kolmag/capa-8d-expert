@@ -62,6 +62,22 @@ Expert answer with inline source citations
 | Observability | Langfuse decorators when project keys are configured |
 | UI | Gradio 5.x / 6.x (streaming) |
 
+**Selectable model stacks:**
+
+| Stack | Use it when |
+|---|---|
+| `oss` — gpt-oss-120b + gpt-oss-20b | Default SICC-aligned stack for current work |
+| `legacy_mixed` — GPT-4o-mini + Claude Haiku | Validated benchmark stack preserving the earlier evaluated results |
+| `cheap_oss` — gpt-oss-20b full stack | Cost-optimized OSS option for quick checks or lower-cost fallback |
+| `hf_experimental` — configurable Hugging Face model | Experimental playground stack; set `HF_EXPERIMENTAL_MODEL` or the per-role `HF_*_MODEL` overrides |
+
+The Gradio app exposes these as friendly dropdown labels. The CLI and eval runner use the stable stack IDs, for example:
+
+```bash
+uv run scripts/answer.py --model-stack legacy_mixed "What locations must I check for D3 containment?"
+uv run evaluation/eval.py --sample 5 --model-stack cheap_oss
+```
+
 ---
 
 ## Knowledge Base

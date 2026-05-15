@@ -63,6 +63,10 @@ ANSWER_MODEL     = OSS_120B_MODEL
 LLM_RERANK_MODEL = OSS_20B_MODEL
 LEGACY_ANSWER_MODEL = "gpt-4o-mini"
 LEGACY_HAIKU_MODEL  = "anthropic/claude-3-5-haiku-20241022"
+HF_EXPERIMENTAL_MODEL = os.getenv(
+    "HF_EXPERIMENTAL_MODEL",
+    "huggingface/meta-llama/Meta-Llama-3.1-8B-Instruct",
+)
 
 BGE_MODEL_NAME  = "BAAI/bge-reranker-v2-m3"  # HuggingFace cross-encoder
 
@@ -95,7 +99,7 @@ MODEL_STACKS = {
     ),
     "legacy_mixed": ModelStack(
         stack_id="legacy_mixed",
-        label="Legacy benchmark — GPT-4o-mini + Claude Haiku",
+        label="Validated benchmark stack — GPT-4o-mini + Claude Haiku",
         rewrite_model=LEGACY_HAIKU_MODEL,
         answer_model=LEGACY_ANSWER_MODEL,
         checker_model=LEGACY_HAIKU_MODEL,
@@ -103,11 +107,19 @@ MODEL_STACKS = {
     ),
     "cheap_oss": ModelStack(
         stack_id="cheap_oss",
-        label="Cheap OSS fallback — gpt-oss-20b full stack",
+        label="Cost-optimized OSS stack — gpt-oss-20b full stack",
         rewrite_model=OSS_20B_MODEL,
         answer_model=OSS_20B_MODEL,
         checker_model=OSS_20B_MODEL,
         llm_rerank_model=OSS_20B_MODEL,
+    ),
+    "hf_experimental": ModelStack(
+        stack_id="hf_experimental",
+        label="Experimental HF stack — configurable Hugging Face model",
+        rewrite_model=os.getenv("HF_REWRITE_MODEL", HF_EXPERIMENTAL_MODEL),
+        answer_model=os.getenv("HF_ANSWER_MODEL", HF_EXPERIMENTAL_MODEL),
+        checker_model=os.getenv("HF_CHECKER_MODEL", HF_EXPERIMENTAL_MODEL),
+        llm_rerank_model=os.getenv("HF_RERANK_MODEL", HF_EXPERIMENTAL_MODEL),
     ),
 }
 DEFAULT_MODEL_STACK = "oss"
