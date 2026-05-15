@@ -54,9 +54,11 @@ scripts/diagnostics/results
 tsne_*.html
 tsne_*.png
 
-# Workbench app — published separately at kolmag/8d-expert-workbench
-workbench_app.py
-
 # Sc diagnostic outputs — generated, not source
 sc_*.html
 
+# Retired local script copies — canonical code lives in src/ and workbench repo
+workbench_app.py
+scripts/answer_groq.py
+scripts/answer_original.py
+scripts/workbench_app.py
