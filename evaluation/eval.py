@@ -36,7 +36,7 @@ from anthropic import Anthropic
 from tenacity import retry, stop_after_attempt, wait_exponential
 from tqdm import tqdm
 
-from capa_8d_expert.answer import answer as run_answer
+from capa_8d_expert.answer import DEFAULT_MODEL_STACK, MODEL_STACKS, answer as run_answer
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -231,6 +231,7 @@ def evaluate_one(
     test: TestCase,
     use_rewrite: bool,
     judge_client: Anthropic,
+    model_stack: str = DEFAULT_MODEL_STACK,
 ) -> EvalResult:
     """Run a single test case through the full eval pipeline."""
     start = time.time()
@@ -240,6 +241,7 @@ def evaluate_one(
             question=test.question,
             use_rewrite=use_rewrite,
             debug=False,
+            model_stack=model_stack,
         )
 
         mrr, found, missing = compute_mrr(
@@ -451,6 +453,12 @@ def main():
         "--category", type=str, default=None,
         help="Run only tests in this category",
     )
+    parser.add_argument(
+        "--model-stack",
+        choices=list(MODEL_STACKS),
+        default=DEFAULT_MODEL_STACK,
+        help="Model stack to use for answer generation and checker",
+    )
     args = parser.parse_args()
 
     # Load tests
@@ -480,6 +488,7 @@ def main():
     print(f"  CAPA/8D Expert — Running Evaluation")
     print(f"  Tests     : {len(tests)}")
     print(f"  Judge     : {JUDGE_MODEL}")
+    print(f"  Stack     : {args.model_stack}")
     print(f"  Rewrites  : {'off' if args.no_rewrite else 'on'}")
     print(f"{'─'*65}\n")
 
@@ -491,6 +500,7 @@ def main():
             test=test,
             use_rewrite=not args.no_rewrite,
             judge_client=judge_client,
+            model_stack=args.model_stack,
         )
         results.append(result)
 
@@ -516,6 +526,7 @@ def main():
         "timestamp": timestamp,
         "config": {
             "judge_model": JUDGE_MODEL,
+            "model_stack": args.model_stack,
             "use_rewrite": not args.no_rewrite,
             "n_tests": len(tests),
         },

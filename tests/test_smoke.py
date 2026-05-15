@@ -26,11 +26,21 @@ def test_eval_and_runtime_models_match_current_oss_stack():
     eval_mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(eval_mod)
 
-    from capa_8d_expert.answer import ANSWER_MODEL, LLM_RERANK_MODEL, REWRITE_MODEL, OSS_120B_MODEL, OSS_20B_MODEL
+    from capa_8d_expert.answer import (
+        ANSWER_MODEL,
+        LLM_RERANK_MODEL,
+        MODEL_STACKS,
+        REWRITE_MODEL,
+        OSS_120B_MODEL,
+        OSS_20B_MODEL,
+    )
 
     assert eval_mod.JUDGE_MODEL == "claude-sonnet-4-6"
     assert ANSWER_MODEL == REWRITE_MODEL == OSS_120B_MODEL == "groq/openai/gpt-oss-120b"
     assert LLM_RERANK_MODEL == OSS_20B_MODEL == "groq/openai/gpt-oss-20b"
+    assert set(MODEL_STACKS) == {"oss", "legacy_mixed", "cheap_oss"}
+    assert MODEL_STACKS["legacy_mixed"].answer_model == "gpt-4o-mini"
+    assert MODEL_STACKS["cheap_oss"].answer_model == "groq/openai/gpt-oss-20b"
     assert "4-5" not in eval_mod.JUDGE_MODEL
     assert all("gpt-4o" not in model and "haiku" not in model for model in [ANSWER_MODEL, REWRITE_MODEL, LLM_RERANK_MODEL])
 

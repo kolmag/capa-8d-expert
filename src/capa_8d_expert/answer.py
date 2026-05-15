@@ -61,6 +61,8 @@ OSS_20B_MODEL    = "groq/openai/gpt-oss-20b"   # groundedness checker + fallback
 REWRITE_MODEL    = OSS_120B_MODEL
 ANSWER_MODEL     = OSS_120B_MODEL
 LLM_RERANK_MODEL = OSS_20B_MODEL
+LEGACY_ANSWER_MODEL = "gpt-4o-mini"
+LEGACY_HAIKU_MODEL  = "anthropic/claude-3-5-haiku-20241022"
 
 BGE_MODEL_NAME  = "BAAI/bge-reranker-v2-m3"  # HuggingFace cross-encoder
 
@@ -71,6 +73,61 @@ ANSWER_TEMP     = 0     # deterministic expert answers
 
 
 # ── Data models ────────────────────────────────────────────────────────────────
+
+@dataclass
+class ModelStack:
+    stack_id:         str
+    label:            str
+    rewrite_model:    str
+    answer_model:     str
+    checker_model:    str
+    llm_rerank_model: str
+
+
+MODEL_STACKS = {
+    "oss": ModelStack(
+        stack_id="oss",
+        label="OSS stack — gpt-oss-120b + gpt-oss-20b",
+        rewrite_model=REWRITE_MODEL,
+        answer_model=ANSWER_MODEL,
+        checker_model=OSS_20B_MODEL,
+        llm_rerank_model=LLM_RERANK_MODEL,
+    ),
+    "legacy_mixed": ModelStack(
+        stack_id="legacy_mixed",
+        label="Legacy benchmark — GPT-4o-mini + Claude Haiku",
+        rewrite_model=LEGACY_HAIKU_MODEL,
+        answer_model=LEGACY_ANSWER_MODEL,
+        checker_model=LEGACY_HAIKU_MODEL,
+        llm_rerank_model=LEGACY_HAIKU_MODEL,
+    ),
+    "cheap_oss": ModelStack(
+        stack_id="cheap_oss",
+        label="Cheap OSS fallback — gpt-oss-20b full stack",
+        rewrite_model=OSS_20B_MODEL,
+        answer_model=OSS_20B_MODEL,
+        checker_model=OSS_20B_MODEL,
+        llm_rerank_model=OSS_20B_MODEL,
+    ),
+}
+DEFAULT_MODEL_STACK = "oss"
+MODEL_STACK_OPTIONS = {stack.label: stack.stack_id for stack in MODEL_STACKS.values()}
+
+
+def resolve_model_stack(model_stack: str | ModelStack | None = None) -> ModelStack:
+    """Resolve a stack id, display label, or ModelStack to a concrete model stack."""
+    if isinstance(model_stack, ModelStack):
+        return model_stack
+
+    key = model_stack or DEFAULT_MODEL_STACK
+    if key in MODEL_STACKS:
+        return MODEL_STACKS[key]
+    if key in MODEL_STACK_OPTIONS:
+        return MODEL_STACKS[MODEL_STACK_OPTIONS[key]]
+
+    valid = ", ".join(MODEL_STACKS)
+    raise ValueError(f"Unknown model stack '{key}'. Valid stacks: {valid}")
+
 
 @dataclass
 class RetrievedChunk:
@@ -102,6 +159,7 @@ class AnswerResult:
     sources:           list[str]
     reranker_used:     str
     checker_score:     float = 1.0   # Option 3 groundedness score (0-1); 1.0 = skipped or perfect
+    model_stack:       str = DEFAULT_MODEL_STACK
 
 
 # ── BGE reranker (HuggingFace) ─────────────────────────────────────────────────
@@ -224,9 +282,9 @@ Score this chunk's relevance to the question. Return JSON only."""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
-def _llm_score_chunk(question: str, chunk: RetrievedChunk) -> float:
+def _llm_score_chunk(question: str, chunk: RetrievedChunk, stack: ModelStack) -> float:
     response = completion(
-        model=LLM_RERANK_MODEL,
+        model=stack.llm_rerank_model,
         messages=[
             {"role": "system", "content": RERANK_SYSTEM},
             {"role": "user", "content": RERANK_PROMPT.format(
@@ -250,11 +308,13 @@ def llm_rerank(
     question: str,
     chunks: list[RetrievedChunk],
     final_k: int = FINAL_K,
+    model_stack: str | ModelStack | None = None,
 ) -> list[RankedChunk]:
     """LLM-based reranking — one OSS-20B call per chunk."""
+    stack = resolve_model_stack(model_stack)
     ranked = []
     for chunk in chunks:
-        score = _llm_score_chunk(question, chunk)
+        score = _llm_score_chunk(question, chunk, stack)
         ranked.append(RankedChunk(
             chunk_id=chunk.chunk_id,
             source_file=chunk.source_file,
@@ -273,6 +333,7 @@ def rerank(
     chunks: list[RetrievedChunk],
     final_k: int = FINAL_K,
     mode: str = "auto",   # "auto" | "bge" | "llm"
+    model_stack: str | ModelStack | None = None,
 ) -> tuple[list[RankedChunk], str]:
     """
     Rerank with the best available method.
@@ -281,8 +342,9 @@ def rerank(
     mode="llm":  force LLM reranker
     Returns (ranked_chunks, reranker_name)
     """
+    stack = resolve_model_stack(model_stack)
     if mode == "llm":
-        return llm_rerank(question, chunks, final_k), "llm"
+        return llm_rerank(question, chunks, final_k, model_stack=stack), "llm"
 
     if mode == "bge":
         ranked, ok = bge_rerank(question, chunks, final_k)
@@ -296,7 +358,7 @@ def rerank(
     ranked, ok = bge_rerank(question, chunks, final_k)
     if ok:
         return ranked, "bge"
-    return llm_rerank(question, chunks, final_k), "llm"
+    return llm_rerank(question, chunks, final_k, model_stack=stack), "llm"
 
 
 # ── Chroma client ──────────────────────────────────────────────────────────────
@@ -345,8 +407,10 @@ def rewrite_query(
     question: str,
     n: int = N_REWRITES,
     history: list[dict] | None = None,
+    model_stack: str | ModelStack | None = None,
 ) -> list[str]:
     """Generate N alternative query phrasings, optionally grounded in conversation history."""
+    stack = resolve_model_stack(model_stack)
     # Build history summary for context (last 3 turns max)
     if history and len(history) >= 2:
         turns = history[-6:]  # last 3 user+assistant pairs
@@ -364,7 +428,7 @@ def rewrite_query(
         prompt = REWRITE_PROMPT.format(question=question, n=n)
 
     response = completion(
-        model=REWRITE_MODEL,
+        model=stack.rewrite_model,
         messages=[
             {"role": "system", "content": REWRITE_SYSTEM},
             {"role": "user", "content": prompt},
@@ -498,10 +562,12 @@ def generate_answer(
     question: str,
     chunks: list[RankedChunk],
     history: list[dict] | None = None,
+    model_stack: str | ModelStack | None = None,
 ) -> str:
     """Generate an expert answer, optionally with conversation history for follow-ups."""
+    stack = resolve_model_stack(model_stack)
     response = completion(
-        model=ANSWER_MODEL,
+        model=stack.answer_model,
         messages=_build_answer_messages(question, chunks, history=history),
         temperature=ANSWER_TEMP,
         max_tokens=1200,
@@ -552,6 +618,7 @@ def check_groundedness(
     chunks: list[RankedChunk],
     answer_text: str,
     threshold: float = 0.75,
+    model_stack: str | ModelStack | None = None,
 ) -> tuple[str, float]:
     """
     Post-process answer to remove ungrounded claims.
@@ -560,6 +627,7 @@ def check_groundedness(
     Skips if all BGE scores are very low — synthesis answers are expected to draw
     across many low-scored chunks and don't benefit from claim-level checking.
     """
+    stack = resolve_model_stack(model_stack)
     # Skip for very short answers — nothing to trim
     if len(answer_text) < 200:
         return clean_citation_artifacts(answer_text), 1.0
@@ -580,7 +648,7 @@ def check_groundedness(
         context_summary = "\n".join(context_parts)
 
         response = completion(
-            model=OSS_20B_MODEL,
+            model=stack.checker_model,
             messages=[
                 {"role": "system", "content": GROUNDEDNESS_SYSTEM},
                 {"role": "user", "content": GROUNDEDNESS_PROMPT.format(
@@ -627,13 +695,15 @@ def _prepare_answer_context(
     debug: bool = False,
     reranker_mode: str = "auto",
     history: list[dict] | None = None,
+    model_stack: str | ModelStack | None = None,
 ) -> tuple[list[str], list[RankedChunk], str, list[str]]:
     """Run rewrite, retrieval, merge and rerank; shared by blocking and streaming APIs."""
+    stack = resolve_model_stack(model_stack)
     collection = get_collection()
 
     # Step 1: Query rewriting (history-aware for follow-ups)
     if use_rewrite:
-        rewrites = rewrite_query(question, history=history)
+        rewrites = rewrite_query(question, history=history, model_stack=stack)
         if debug:
             print(f"\n[Rewrites]")
             for r in rewrites:
@@ -657,7 +727,13 @@ def _prepare_answer_context(
         print(f"\n[Merged: {len(merged)} unique chunks]")
 
     # Step 4: Rerank
-    ranked, reranker_used = rerank(question, merged, final_k=FINAL_K, mode=reranker_mode)
+    ranked, reranker_used = rerank(
+        question,
+        merged,
+        final_k=FINAL_K,
+        mode=reranker_mode,
+        model_stack=stack,
+    )
     if debug:
         print(f"\n[Top {len(ranked)} after reranking — {reranker_used}]")
         for c in ranked:
@@ -707,6 +783,7 @@ def answer(
     debug: bool = False,
     reranker_mode: str = "auto",
     history: list[dict] | None = None,
+    model_stack: str | ModelStack | None = None,
 ) -> AnswerResult:
     """Full RAG pipeline: rewrite → retrieve → merge → rerank → answer.
 
@@ -714,20 +791,22 @@ def answer(
              from previous turns. Used to ground query rewrites and answer
              generation for follow-up questions.
     """
+    stack = resolve_model_stack(model_stack)
     rewrites, ranked, reranker_used, sources = _prepare_answer_context(
         question=question,
         use_rewrite=use_rewrite,
         debug=debug,
         reranker_mode=reranker_mode,
         history=history,
+        model_stack=stack,
     )
 
     # Step 5: Generate answer
-    answer_text = generate_answer(question, ranked, history=history)
+    answer_text = generate_answer(question, ranked, history=history, model_stack=stack)
 
     # Step 5b: Groundedness post-check — strip ungrounded claims
     answer_text, groundedness_score = check_groundedness(
-        question, ranked, answer_text
+        question, ranked, answer_text, model_stack=stack
     )
     if debug:
         print(f"\n[Groundedness score: {groundedness_score:.2f}]")
@@ -740,6 +819,7 @@ def answer(
         sources=sources,
         reranker_used=reranker_used,
         checker_score=groundedness_score,
+        model_stack=stack.stack_id,
     )
 
 
@@ -750,6 +830,7 @@ def answer_stream(
     debug: bool = False,
     reranker_mode: str = "auto",
     history: list[dict] | None = None,
+    model_stack: str | ModelStack | None = None,
     _sink: dict | None = None,
 ):
     """Streaming RAG pipeline.
@@ -758,12 +839,14 @@ def answer_stream(
     populated with retrieval metadata before the first token is yielded so UIs
     can render sources while generation streams.
     """
+    stack = resolve_model_stack(model_stack)
     rewrites, ranked, reranker_used, sources = _prepare_answer_context(
         question=question,
         use_rewrite=use_rewrite,
         debug=debug,
         reranker_mode=reranker_mode,
         history=history,
+        model_stack=stack,
     )
 
     if _sink is not None:
@@ -772,11 +855,13 @@ def answer_stream(
             "ranked_chunks": ranked,
             "reranker_used": reranker_used,
             "sources": sources,
+            "model_stack": stack.stack_id,
+            "model_stack_label": stack.label,
         })
 
     accumulated = ""
     stream = completion(
-        model=ANSWER_MODEL,
+        model=stack.answer_model,
         messages=_build_answer_messages(question, ranked, history=history),
         temperature=ANSWER_TEMP,
         max_tokens=1200,
@@ -789,7 +874,12 @@ def answer_stream(
         accumulated += delta
         yield clean_citation_artifacts(accumulated)
 
-    cleaned, groundedness_score = check_groundedness(question, ranked, accumulated)
+    cleaned, groundedness_score = check_groundedness(
+        question,
+        ranked,
+        accumulated,
+        model_stack=stack,
+    )
     if _sink is not None:
         _sink["checker_score"] = groundedness_score
         _sink["answer"] = cleaned
@@ -808,6 +898,8 @@ def main():
                         help="Show retrieval and reranking details")
     parser.add_argument("--reranker", choices=["auto", "bge", "llm"], default="auto",
                         help="Reranker to use (default: auto)")
+    parser.add_argument("--model-stack", choices=list(MODEL_STACKS), default=DEFAULT_MODEL_STACK,
+                        help="Model stack to use (default: oss)")
     args = parser.parse_args()
 
     print(f"\n{'─'*60}")
@@ -819,6 +911,7 @@ def main():
         use_rewrite=not args.no_rewrite,
         debug=args.debug,
         reranker_mode=args.reranker,
+        model_stack=args.model_stack,
     )
 
     print(result.answer)
