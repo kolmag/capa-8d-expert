@@ -46,9 +46,9 @@ CHROMA_DIR         = Path("chroma_db")
 COLLECTION_NAME    = "capa_8d_expert"
 
 # Chunking params (tuned from evaluation experiments)
-CHUNK_SIZE         = 400    # treduced from 500 — stays within BGE 512-token limit
+CHUNK_SIZE         = 400    # reduced from 500 — stays within BGE 512-token limit
                             # (BGE tokenizer ~1.15× GPT; 400×1.15 + enrichment ≈ 510 tokens)
-CHUNK_OVERLAP      = 150    # toproportionally reduced from 200
+CHUNK_OVERLAP      = 150    # proportionally reduced from 200
 
 # LLM for semantic enrichment
 ENRICHMENT_MODEL   = "claude-haiku-4-5"   # fast + cheap + excellent JSON
@@ -179,7 +179,10 @@ def get_category(filename: str) -> str:
 
 def load_documents(kb_dir: Path) -> list[RawChunk]:
     """Load all .md files and split into raw token-aware chunks."""
-    md_files = sorted(kb_dir.glob("*.md"))
+    md_files = sorted(
+        p for p in kb_dir.glob("*.md")
+        if p.name.lower() != "readme.md"
+    )
     if not md_files:
         raise FileNotFoundError(f"No .md files found in {kb_dir}")
 

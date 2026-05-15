@@ -42,6 +42,14 @@ from anthropic import Anthropic
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
+try:
+    from langfuse import observe
+except Exception:
+    def observe(func=None, **_kwargs):
+        def decorator(f):
+            return f
+        return decorator(func) if func is not None else decorator
+
 # ── Config ─────────────────────────────────────────────────────────────────────
 
 CHROMA_DIR      = Path("chroma_db")
@@ -54,7 +62,7 @@ LLM_RERANK_MODEL = "claude-haiku-4-5"  # fallback LLM reranker
 BGE_MODEL_NAME  = "BAAI/bge-reranker-v2-m3"  # HuggingFace cross-encoder
 
 N_REWRITES      = 3     # number of alternative query phrasings
-RETRIEVAL_K     = 20    # candidates retrieved per query
+RETRIEVAL_K     = 30    # candidates retrieved per query
 FINAL_K         = 15    # chunks kept after reranking for answer context
 ANSWER_TEMP     = 0     # deterministic expert answers
 
@@ -133,6 +141,7 @@ def _load_bge() -> Optional[object]:
         return None
 
 
+@observe(name="bge_rerank", as_type="retriever")
 def bge_rerank(
     question: str,
     chunks: list[RetrievedChunk],
@@ -229,6 +238,7 @@ def _llm_score_chunk(question: str, chunk: RetrievedChunk, client: Anthropic) ->
     return float(json.loads(raw).get("score", 0))
 
 
+@observe(name="llm_rerank", as_type="retriever")
 def llm_rerank(
     question: str,
     chunks: list[RetrievedChunk],
@@ -324,6 +334,7 @@ Return JSON array only: ["phrasing 1", "phrasing 2", ...]"""
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
+@observe(name="rewrite_query")
 def rewrite_query(
     question: str,
     n: int = N_REWRITES,
@@ -371,6 +382,7 @@ def embed_query(text: str) -> list[float]:
     return response.data[0].embedding
 
 
+@observe(name="retrieve", as_type="retriever")
 def retrieve(
     query: str,
     collection: chromadb.Collection,
@@ -464,6 +476,7 @@ def build_context(chunks: list[RankedChunk]) -> str:
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=5))
+@observe(name="generate_answer", as_type="generation")
 def generate_answer(
     question: str,
     chunks: list[RankedChunk],
@@ -471,40 +484,10 @@ def generate_answer(
 ) -> str:
     """Generate an expert answer, optionally with conversation history for follow-ups."""
     client = OpenAI()
-    context = build_context(chunks)
-
-    if history and len(history) >= 2:
-        # Build messages: system + last N turns + current question with context
-        messages = [{"role": "system", "content": ANSWER_SYSTEM}]
-
-        # Include last 4 turns (2 user + 2 assistant) for context
-        for msg in history[-4:]:
-            messages.append({
-                "role": msg["role"],
-                "content": msg["content"][:800],  # truncate long turns
-            })
-
-        # Add current question with retrieved context
-        messages.append({
-            "role": "user",
-            "content": ANSWER_PROMPT_FOLLOWUP.format(
-                question=question,
-                context=context,
-            ),
-        })
-    else:
-        messages = [
-            {"role": "system", "content": ANSWER_SYSTEM},
-            {"role": "user",   "content": ANSWER_PROMPT.format(
-                question=question,
-                context=context,
-            )},
-        ]
-
     response = client.chat.completions.create(
         model=ANSWER_MODEL,
         temperature=ANSWER_TEMP,
-        messages=messages,
+        messages=_build_answer_messages(question, chunks, history=history),
     )
     return response.choices[0].message.content.strip()
 
@@ -545,6 +528,7 @@ Check each claim. Return JSON only."""
 
 
 @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=4))
+@observe(name="groundedness_check", as_type="guardrail")
 def check_groundedness(
     question: str,
     chunks: list[RankedChunk],
@@ -617,19 +601,14 @@ def check_groundedness(
 
 # ── Full pipeline ──────────────────────────────────────────────────────────────
 
-def answer(
+def _prepare_answer_context(
     question: str,
     use_rewrite: bool = True,
     debug: bool = False,
     reranker_mode: str = "auto",
     history: list[dict] | None = None,
-) -> AnswerResult:
-    """Full RAG pipeline: rewrite → retrieve → merge → rerank → answer.
-
-    history: list of {"role": "user"|"assistant", "content": str} dicts
-             from previous turns. Used to ground query rewrites and answer
-             generation for follow-up questions.
-    """
+) -> tuple[list[str], list[RankedChunk], str, list[str]]:
+    """Run rewrite, retrieval, merge and rerank; shared by blocking and streaming APIs."""
     collection = get_collection()
 
     # Step 1: Query rewriting (history-aware for follow-ups)
@@ -664,6 +643,65 @@ def answer(
         for c in ranked:
             print(f"  {c.relevance_score:.2f} | {c.source_file} | {c.headline[:60]}")
 
+    sources = list(dict.fromkeys(c.source_file for c in ranked))
+    return rewrites, ranked, reranker_used, sources
+
+
+def _build_answer_messages(
+    question: str,
+    chunks: list[RankedChunk],
+    history: list[dict] | None = None,
+) -> list[dict]:
+    """Build OpenAI chat messages for answer generation."""
+    context = build_context(chunks)
+
+    if history and len(history) >= 2:
+        messages = [{"role": "system", "content": ANSWER_SYSTEM}]
+        for msg in history[-4:]:
+            messages.append({
+                "role": msg["role"],
+                "content": msg["content"][:800],
+            })
+        messages.append({
+            "role": "user",
+            "content": ANSWER_PROMPT_FOLLOWUP.format(
+                question=question,
+                context=context,
+            ),
+        })
+        return messages
+
+    return [
+        {"role": "system", "content": ANSWER_SYSTEM},
+        {"role": "user", "content": ANSWER_PROMPT.format(
+            question=question,
+            context=context,
+        )},
+    ]
+
+
+@observe(name="answer", as_type="chain")
+def answer(
+    question: str,
+    use_rewrite: bool = True,
+    debug: bool = False,
+    reranker_mode: str = "auto",
+    history: list[dict] | None = None,
+) -> AnswerResult:
+    """Full RAG pipeline: rewrite → retrieve → merge → rerank → answer.
+
+    history: list of {"role": "user"|"assistant", "content": str} dicts
+             from previous turns. Used to ground query rewrites and answer
+             generation for follow-up questions.
+    """
+    rewrites, ranked, reranker_used, sources = _prepare_answer_context(
+        question=question,
+        use_rewrite=use_rewrite,
+        debug=debug,
+        reranker_mode=reranker_mode,
+        history=history,
+    )
+
     # Step 5: Generate answer
     answer_text = generate_answer(question, ranked, history=history)
 
@@ -674,8 +712,6 @@ def answer(
     if debug:
         print(f"\n[Groundedness score: {groundedness_score:.2f}]")
 
-    sources = list(dict.fromkeys(c.source_file for c in ranked))
-
     return AnswerResult(
         question=question,
         rewritten_queries=rewrites,
@@ -685,6 +721,60 @@ def answer(
         reranker_used=reranker_used,
         checker_score=groundedness_score,
     )
+
+
+@observe(name="answer_stream", as_type="chain")
+def answer_stream(
+    question: str,
+    use_rewrite: bool = True,
+    debug: bool = False,
+    reranker_mode: str = "auto",
+    history: list[dict] | None = None,
+    _sink: dict | None = None,
+):
+    """Streaming RAG pipeline.
+
+    Yields progressively accumulated answer text. The optional _sink dict is
+    populated with retrieval metadata before the first token is yielded so UIs
+    can render sources while generation streams.
+    """
+    rewrites, ranked, reranker_used, sources = _prepare_answer_context(
+        question=question,
+        use_rewrite=use_rewrite,
+        debug=debug,
+        reranker_mode=reranker_mode,
+        history=history,
+    )
+
+    if _sink is not None:
+        _sink.update({
+            "rewritten_queries": rewrites,
+            "ranked_chunks": ranked,
+            "reranker_used": reranker_used,
+            "sources": sources,
+        })
+
+    client = OpenAI()
+    accumulated = ""
+    stream = client.chat.completions.create(
+        model=ANSWER_MODEL,
+        temperature=ANSWER_TEMP,
+        messages=_build_answer_messages(question, ranked, history=history),
+        stream=True,
+    )
+    for event in stream:
+        delta = event.choices[0].delta.content or ""
+        if not delta:
+            continue
+        accumulated += delta
+        yield accumulated
+
+    cleaned, groundedness_score = check_groundedness(question, ranked, accumulated)
+    if _sink is not None:
+        _sink["checker_score"] = groundedness_score
+        _sink["answer"] = cleaned
+    if cleaned != accumulated:
+        yield cleaned
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────

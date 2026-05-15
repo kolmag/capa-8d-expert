@@ -160,6 +160,18 @@ ASSISTANT'S ANSWER:
 
 Score this answer. Return JSON only."""
 
+ADVERSARIAL_JUDGE_PROMPT = """QUESTION: {question}
+
+ASSISTANT'S ANSWER:
+{answer}
+
+This is an out-of-scope or adversarial test. Score the answer on:
+- correctness: it should not invent unsupported CAPA/8D guidance
+- completeness: it should clearly say what can and cannot be answered from the available documentation
+- groundedness: it should stay within the retrieved CAPA/8D context and avoid general Lean/Six Sigma claims unless supported
+
+Return JSON only."""
+
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=2, max=10))
 def judge_answer(
@@ -292,19 +304,29 @@ def compute_aggregates(results: list[EvalResult]) -> dict:
     if not valid:
         return {"error": "No valid results"}
 
+    structured = [
+        r for r in valid
+        if r.sources_found or r.sources_missing
+    ]
+
     # Overall metrics
     agg = {
         "total": len(results),
         "valid": len(valid),
         "failed": len(results) - len(valid),
         "mean_mrr": mean(r.mrr_score for r in valid),
+        "structured_source_tests": len(structured),
+        "structured_mean_mrr": mean(r.mrr_score for r in structured) if structured else 0.0,
         "mean_correctness": mean(r.judge.correctness for r in valid),
         "mean_completeness": mean(r.judge.completeness for r in valid),
         "mean_groundedness": mean(r.judge.groundedness for r in valid),
         "mean_overall": mean(r.judge.overall for r in valid),
         "mean_top_chunk_score": mean(r.top_chunk_score for r in valid),
         "mean_latency_s": mean(r.latency_s for r in valid),
-        "source_coverage_rate": mean(1.0 if not r.sources_missing else 0.0 for r in valid),
+        "source_coverage_rate": (
+            mean(1.0 if not r.sources_missing else 0.0 for r in structured)
+            if structured else 0.0
+        ),
         # Option 3 groundedness checker metrics
         "mean_checker_score": mean(r.checker_score for r in valid),
         "checker_fired_rate": mean(1.0 if r.checker_score < 1.0 else 0.0 for r in valid),
@@ -357,6 +379,7 @@ def print_report(results: list[EvalResult], agg: dict):
     print(f"  OVERALL METRICS  ({agg['valid']}/{agg['total']} tests passed)")
     print(f"{'─'*65}")
     print(f"  MRR (source retrieval)   : {agg['mean_mrr']:.3f}")
+    print(f"  MRR (structured only)    : {agg['structured_mean_mrr']:.3f}  ({agg['structured_source_tests']} tests)")
     print(f"  Source coverage rate     : {agg['source_coverage_rate']:.1%}")
     print(f"  Judge — Correctness      : {agg['mean_correctness']:.2f}/10")
     print(f"  Judge — Completeness     : {agg['mean_completeness']:.2f}/10")
@@ -410,8 +433,8 @@ def main():
     parser = argparse.ArgumentParser(description="CAPA/8D Expert — Evaluation Pipeline")
     parser.add_argument(
         "--tests", type=Path,
-        default=Path("evaluation/tests_v2.jsonl"),
-        help="Path to tests jsonl (default: tests_v2.jsonl)",
+        default=Path("evaluation/tests_v3.jsonl"),
+        help="Path to tests jsonl (default: tests_v3.jsonl)",
     )
     parser.add_argument(
         "--sample", type=int, default=None,

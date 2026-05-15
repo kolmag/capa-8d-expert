@@ -21,7 +21,7 @@ except ImportError:
 import gradio as gr
 
 sys.path.insert(0, str(Path(__file__).parent))
-from answer import answer, AnswerResult, _load_bge
+from answer import answer_stream, AnswerResult, _load_bge
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -119,16 +119,33 @@ def format_sources_panel(result: AnswerResult) -> str:
     return "\n".join(parts)
 
 
+def format_sources_from_sink(sink: dict) -> str:
+    if not sink.get("ranked_chunks"):
+        return "<p style='color:#888'>No sources retrieved.</p>"
+
+    result = AnswerResult(
+        question="",
+        rewritten_queries=sink.get("rewritten_queries", []),
+        ranked_chunks=sink.get("ranked_chunks", []),
+        answer=sink.get("answer", ""),
+        sources=sink.get("sources", []),
+        reranker_used=sink.get("reranker_used", "bge"),
+        checker_score=sink.get("checker_score", 1.0),
+    )
+    return format_sources_panel(result)
+
+
 # ── Chat handler ───────────────────────────────────────────────────────────────
 
 def chat(
     message: str,
     history: list[dict],
     use_rewrite: bool,
-) -> tuple[list[dict], str, str]:
+):
     """Gradio 6 messages format: history is list[{"role": ..., "content": ...}]"""
     if not message.strip():
-        return history, "", "<p style='color:#888'>Ask a question to see sources.</p>"
+        yield history, "", "<p style='color:#888'>Ask a question to see sources.</p>"
+        return
 
     try:
         # Build history for context (exclude the current empty assistant turn)
@@ -144,15 +161,29 @@ def chat(
             for m in history
             if _content_str(m).strip()
         ]
-        result = answer(
+        new_history = history + [{"role": "user", "content": message}]
+        yield (
+            new_history + [{"role": "assistant", "content": "Retrieving and ranking sources..."}],
+            "",
+            "<p style='color:#888'>Retrieving and ranking sources...</p>",
+        )
+
+        sink = {}
+        accumulated = ""
+        for partial in answer_stream(
             question=message,
             use_rewrite=use_rewrite,
             debug=False,
             reranker_mode='auto',
             history=past_turns if past_turns else None,
-        )
-        response_text = result.answer
-        sources_html  = format_sources_panel(result)
+            _sink=sink,
+        ):
+            accumulated = partial
+            yield (
+                new_history + [{"role": "assistant", "content": accumulated}],
+                "",
+                format_sources_from_sink(sink),
+            )
 
     except FileNotFoundError as e:
         response_text = (
@@ -160,17 +191,26 @@ def chat(
             f"Run: `uv run scripts/ingest.py --reset`\n\nError: {e}"
         )
         sources_html = "<p style='color:#C0392B'>Knowledge base not initialised.</p>"
+        yield history + [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": response_text},
+        ], "", sources_html
+        return
 
     except Exception as e:
         response_text = f"**Error:** {str(e)}"
         sources_html  = f"<p style='color:#C0392B'>Error: {str(e)}</p>"
+        yield history + [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": response_text},
+        ], "", sources_html
+        return
 
-    # Gradio 6 messages format
-    updated_history = history + [
-        {"role": "user",      "content": message},
-        {"role": "assistant", "content": response_text},
-    ]
-    return updated_history, "", sources_html
+    yield (
+        new_history + [{"role": "assistant", "content": accumulated}],
+        "",
+        format_sources_from_sink(sink),
+    )
 
 
 # ── UI ─────────────────────────────────────────────────────────────────────────
@@ -236,7 +276,7 @@ def build_ui() -> gr.Blocks:
 
         # ── Events ──────────────────────────────────────────────────────────
         def on_submit(message, history, use_rw):
-            return chat(message, history, use_rw)
+            yield from chat(message, history, use_rw)
 
         submit_inputs  = [msg_input, history_state, use_rewrite]
         submit_outputs = [chatbot, msg_input, sources_panel]

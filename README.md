@@ -2,7 +2,7 @@
 
 An AI-powered expert assistant for quality engineers working with CAPA procedures, 8D problem-solving methodology, root cause analysis, FMEA, and industry compliance standards.
 
-Built as a production-grade RAG pipeline with full evaluation framework, streaming UI, and Langfuse observability — not a demo.
+Built as a production-grade RAG pipeline with an evaluation framework, streaming UI, and optional Langfuse observability.
 
 ---
 
@@ -59,7 +59,7 @@ Expert answer with inline source citations
 | Reranker | `BAAI/bge-reranker-v2-m3` (HuggingFace, local) |
 | Answer generation | `gpt-4o-mini` (OpenAI) |
 | Groundedness check | Claude Haiku |
-| Observability | Langfuse (traces per pipeline run) |
+| Observability | Langfuse decorators when project keys are configured |
 | UI | Gradio 5.x / 6.x (streaming) |
 
 ---
@@ -177,7 +177,7 @@ Same 197-question test set, same BGE reranker, same Sonnet 4.5 judge. Only varia
 Each chunk is enriched at ingest with a Claude Haiku-generated headline and summary. Embedding = `headline + summary + original_text`. Improves retrieval for questions phrased differently from source material.
 
 **2. BGE cross-encoder reranking**
-`BAAI/bge-reranker-v2-m3` runs locally (free, no API). Reranks 40–120 merged candidates to 15. ~2s after warmup. Falls back to Claude Haiku if torch not installed. RETRIEVAL_K=30 for broader candidate pool.
+`BAAI/bge-reranker-v2-m3` runs locally (free, no API). Reranks merged candidates to 15. ~2s after warmup. Falls back to Claude Haiku if torch is unavailable. `RETRIEVAL_K=30` gives a broader candidate pool.
 
 **3. Groundedness post-checker**
 After answer generation, Claude Haiku audits each claim against retrieved chunks and strips anything ungrounded. Only fires when top BGE score ≥ 0.5 — skips pure synthesis queries where claim-level checking is too aggressive.
@@ -186,7 +186,7 @@ After answer generation, Claude Haiku audits each claim against retrieved chunks
 Expert Q&A tab streams tokens as they arrive. Sources panel populates from retrieval sink before first token — no second API call needed. Gradio 6.x compatible.
 
 **5. Langfuse observability**
-Every pipeline run traced with child spans: `rewrite_query`, `bge_rerank`, `generate_answer`, `groundedness_check`. Latency, chunk scores, checker scores, and source metadata logged per question.
+The pipeline uses Langfuse `@observe` decorators around retrieval, reranking, generation, and streaming entrypoints. Traces are emitted when Langfuse keys are configured; without keys the app still runs normally.
 
 **6. Three-source test set**
 197 questions built from three independent sources to prevent eval overfitting. External questions are practitioner-phrased with no knowledge of document structure.
@@ -321,7 +321,7 @@ Previous Sc 0.656 (high risk). Post-synthetic query enrichment: 0.562 (resolved)
 - Python 3.11+
 - [uv](https://docs.astral.sh/uv/)
 - OpenAI API key + Anthropic API key
-- Langfuse account (free) + project keys
+- Langfuse account + project keys, optional for tracing
 
 ### Install
 ```bash
@@ -338,6 +338,16 @@ LANGFUSE_PUBLIC_KEY=pk-lf-...
 LANGFUSE_SECRET_KEY=sk-lf-...
 LANGFUSE_HOST=https://cloud.langfuse.com
 ```
+
+### Knowledge base and vector DB
+
+The public repository intentionally ignores `knowledge-base/markdown/*.md` and `chroma_db/`. To run the project from a fresh clone, provide the private markdown knowledge base first, then run:
+
+```bash
+uv run scripts/ingest.py --reset
+```
+
+After changing chunking, enrichment, or KB content, rebuild `chroma_db` before trusting eval results. The checked code currently uses `CHUNK_SIZE=400` and `CHUNK_OVERLAP=150`; a database built with older settings will still load, but it is not measuring the current retrieval design.
 
 ### Optional: BGE reranker
 ```bash
@@ -472,7 +482,7 @@ OAuth2/OIDC (Entra ID, Okta) for corporate SSO. RBAC with metadata filtering at 
 | Scaling | Single process, Gradio | FastAPI + horizontal pods |
 | Auth | None | OAuth2/OIDC + RBAC |
 | KB updates | Manual `--reset` ingest | CI/CD triggered auto-ingest |
-| Observability | Langfuse (implemented) | Langfuse + alerting on score degradation |
+| Observability | Langfuse decorators | Langfuse + alerting on score degradation |
 
 
 
