@@ -219,7 +219,7 @@ def build_ui() -> gr.Blocks:
         gr.Markdown(f"""
 # 🔍 {TITLE}
 **Expert knowledge worker for CAPA procedures, 8D methodology, RCA tools, FMEA, and quality standards.**
-*Claude Haiku · BGE Reranker (local) · GPT-4o-mini · text-embedding-3-small · Chroma*
+*gpt-oss-120b · gpt-oss-20b · BGE Reranker (local) · text-embedding-3-small · Chroma*
         """)
 
         with gr.Row():
